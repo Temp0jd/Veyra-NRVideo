@@ -56,6 +56,12 @@ cmake -S . -B out/build/amd-sr -G Ninja -DCMAKE_BUILD_TYPE=Release `
 cmake --build out/build/amd-sr --target veyra_qml_ui --parallel 2
 ```
 
+一键脚本（会先检查所有依赖，缺什么就列出确切路径后退出）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-amd-sr.ps1 -QtRoot "C:\Qt\6.8.3\msvc2022_64" -DepsRoot "C:\veyra-deps"
+```
+
 补充：
 
 - 也可以用 `scripts/build.ps1 -Root <仓库根> -Preset x64-release`，但该脚本不传 `VEYRA_BUILD_QML_UI=ON`，需要在源码根放好 SDK 后改用上面的显式命令。
