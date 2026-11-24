@@ -943,6 +943,10 @@ struct QmlPlayerBridge::Impl {
             if (!projected->firstOf(engine::EffectType::SuperResolution)) {
                 s.srTarget = previous.srTarget; s.videoSrQuality = previous.videoSrQuality;
                 s.dlssSrModel = previous.dlssSrModel;
+                s.fsrSrVersionMode = previous.fsrSrVersionMode;
+                s.fsrSrReactiveMask = previous.fsrSrReactiveMask;
+                s.fsrSrSharpening = previous.fsrSrSharpening;
+                s.fsrSrSharpness = previous.fsrSrSharpness;
                 s.srPrescale = previous.srPrescale; s.srOutput = previous.srOutput;
                 s.dualSrEnabled=previous.dualSrEnabled;s.dualSrTarget=previous.dualSrTarget;s.dualSrQuality=previous.dualSrQuality;
             }

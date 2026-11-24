@@ -18,9 +18,23 @@ float decode(float v) {
 [numthreads(16,16,1)]
 void main(uint3 p : SV_DispatchThreadID) {
     if(p.x>=width||p.y>=height)return;
-    const float4 pair=packedYuy2[uint2(p.x/2,p.y)];
-    float y=(p.x&1)?pair.z:pair.x;
-    float2 uv=pair.yw-128.0/255.0;
+    const uint k=p.x>>1;
+    const float4 pair=packedYuy2[uint2(k,p.y)];
+    const bool odd=(p.x&1)!=0;
+    float y=odd?pair.z:pair.x;
+    float2 uvRaw=pair.yw;
+    if(odd){
+        // Co-sited 4:2:2: even pixels align with chroma samples, odd pixels sit at k+0.5.
+        // Use anti-ringing 4-tap Catmull-Rom to avoid stair-stepped chroma edges without text halos.
+        const uint maxPair=width>1?((width-1)>>1):0;
+        const float2 u0=packedYuy2[uint2(k>0?k-1:0,p.y)].yw;
+        const float2 u1=uvRaw;
+        const float2 u2=packedYuy2[uint2(min(k+1,maxPair),p.y)].yw;
+        const float2 u3=packedYuy2[uint2(min(k+2,maxPair),p.y)].yw;
+        const float2 catmull=(-u0+9.0*u1+9.0*u2-u3)*0.0625;
+        uvRaw=clamp(catmull,min(u1,u2),max(u1,u2));
+    }
+    float2 uv=uvRaw-128.0/255.0;
     if(limited>0.5){y=(y-16.0/255.0)*(255.0/219.0);uv*=255.0/224.0;}
     // Preserve head/footroom until the final RGB gamut clamp. Clipping Y
     // before the matrix changes saturated pixels with below-black luma.

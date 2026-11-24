@@ -41,17 +41,72 @@ void QmlPlayerBridge::setDlssSrModel(int value) {
     s.dlssSrModel = unsigned(value);
     if (impl_->commit(s)) emit settingsChanged();
 }
+int QmlPlayerBridge::fsrSrVersionMode() const { return int(settings().fsrSrVersionMode); }
+QVariantList QmlPlayerBridge::fsrSrVersionModeChoices() const {
+    return {QVariantMap{{"id", "0"}, {"label", tr("自动（优先 FSR 4）")}},
+            QVariantMap{{"id", "1"}, {"label", tr("FSR 3.x")}},
+            QVariantMap{{"id", "2"}, {"label", tr("FSR 4.x")}}};
+}
+void QmlPlayerBridge::setFsrSrVersionMode(int value) {
+    if (value < 0 || unsigned(value) >= engine::kFsrSrVersionModeCount) return;
+    auto s = settings();
+    if (s.fsrSrVersionMode == unsigned(value)) return;
+    s.fsrSrVersionMode = unsigned(value);
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 FSR 版本模式，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("fsrSrVersionMode")] = value;
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "FSR SR version mode not saved");
+    emit settingsChanged();
+}
+bool QmlPlayerBridge::fsrSrReactiveMask() const { return settings().fsrSrReactiveMask; }
+void QmlPlayerBridge::setFsrSrReactiveMask(bool value) {
+    auto s = settings();
+    if (s.fsrSrReactiveMask == value) return;
+    s.fsrSrReactiveMask = value;
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 FSR 反应遮罩，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("fsrSrReactiveMask")] = value;
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "FSR SR reactive mask not saved");
+    emit settingsChanged();
+}
+bool QmlPlayerBridge::fsrSrSharpening() const { return settings().fsrSrSharpening; }
+void QmlPlayerBridge::setFsrSrSharpening(bool value) {
+    auto s = settings();
+    if (s.fsrSrSharpening == value) return;
+    s.fsrSrSharpening = value;
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 FSR RCAS 锐化，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("fsrSrSharpening")] = value;
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "FSR SR sharpening not saved");
+    emit settingsChanged();
+}
+double QmlPlayerBridge::fsrSrSharpness() const { return double(settings().fsrSrSharpness); }
+void QmlPlayerBridge::setFsrSrSharpness(double value) {
+    if (!std::isfinite(value) || value < 0.0 || value > 1.0) return;
+    auto s = settings();
+    const float next = float(value);
+    if (std::abs(s.fsrSrSharpness - next) < 1e-4f) return;
+    s.fsrSrSharpness = next;
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 FSR RCAS 锐化强度，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("fsrSrSharpness")] = double(next);
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "FSR SR sharpness not saved");
+    emit settingsChanged();
+}
 int QmlPlayerBridge::srPrescale() const { return int(settings().srPrescale); }
 bool QmlPlayerBridge::dualSrEnabled() const { return settings().dualSrEnabled; }
 // Double SR takes every SR backend (user 2026-11-08: DLSS SR and FSR as well).
 void QmlPlayerBridge::setDualSrEnabled(bool enabled){
     auto s=settings();if(s.dualSrEnabled==enabled)return;
+    // Phase 1 keeps the spatial single-pass SR methods out of double SR: they
+    // enlarge once, so a second pass has no meaning for them.
+    if(enabled&&engine::spatialCnnVideoSr(s.videoSrQuality)){
+        emit notice(tr("当前超分算法暂不支持双阶段超分"),true);return;
+    }
     s.dualSrEnabled=enabled;
     if(enabled){
         // A kept second algorithm this adapter cannot run follows the base
         // (an AMD card starts FSR -> FSR instead of a dead RTX choice).
         const auto cap=effectCapabilities().value("sr"+QString::number(s.dualSrQuality)).toMap();
         if(!cap.value("available").toBool())s.dualSrQuality=s.videoSrQuality;
+        // Same fallback for a kept spatial single-pass second algorithm.
+        if(engine::spatialCnnVideoSr(s.dualSrQuality))s.dualSrQuality=s.videoSrQuality;
         // A kept supersample shrink is inactive under double SR and returns when it is off.
         if(s.srPrescale==pipeline::SrPrescale::Off)s.srPrescale=pipeline::SrPrescale::P1080;
     }
@@ -70,6 +125,7 @@ int QmlPlayerBridge::dualSrQuality() const {return int(settings().dualSrQuality)
 // tier, or FSR - independent of the base.
 void QmlPlayerBridge::setDualSrQuality(int quality){
     if(quality<0||!engine::validVideoSrQuality(unsigned(quality)))return;
+    if(engine::spatialCnnVideoSr(unsigned(quality))){emit notice(tr("该超分算法暂不支持双阶段超分"),true);return;}
     const auto cap=effectCapabilities().value("sr"+QString::number(quality)).toMap();
     if(!cap.value("available").toBool()){emit notice(cap.value("reason").toString(),true);return;}
     auto s=settings();if(int(s.dualSrQuality)==quality)return;

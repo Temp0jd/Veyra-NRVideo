@@ -226,6 +226,14 @@ struct ChainGlobalSettings {
     bool dualSrEnabled = false;
     pipeline::SrTarget dualSrTarget = pipeline::SrTarget::Uhd4K;
     uint32_t dualSrQuality = kDefaultVideoSrQuality;
+    // M1-M3 options (library v23 / session v18).
+    uint32_t fsrSrVersionMode = 0;
+    bool fsrSrReactiveMask = true;
+    bool fsrSrSharpening = false;
+    float fsrSrSharpness = 0.5f;
+    uint32_t amfFrcProfile = 0;
+    uint32_t amfFrcMvSearch = 0;
+    bool amfFrcUseFutureFrame = false;
     FrameGenerationBackend fgBackend = FrameGenerationBackend::Dlss;
     uint32_t vfgQuality=1;
     FlowQuality flow = FlowQuality::Balanced;

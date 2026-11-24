@@ -279,6 +279,49 @@ void QmlPlayerBridge::setHudLock(bool value) {
     if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "HUD lock not saved");
     emit settingsChanged();
 }
+int QmlPlayerBridge::amfFrcProfile() const { return int(settings().amfFrcProfile); }
+QVariantList QmlPlayerBridge::amfFrcProfileChoices() const {
+    return {QVariantMap{{"id", "0"}, {"label", tr("自动")}},
+            QVariantMap{{"id", "1"}, {"label", tr("低")}},
+            QVariantMap{{"id", "2"}, {"label", tr("高")}},
+            QVariantMap{{"id", "3"}, {"label", tr("超高")}}};
+}
+void QmlPlayerBridge::setAmfFrcProfile(int value) {
+    if (value < 0 || unsigned(value) >= engine::kAmfFrcProfileCount) return;
+    auto s = settings();
+    if (s.amfFrcProfile == unsigned(value)) return;
+    s.amfFrcProfile = unsigned(value);
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 AMF FRC 质量档，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("amfFrcProfile")] = value;
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "AMF FRC profile not saved");
+    emit settingsChanged();
+}
+int QmlPlayerBridge::amfFrcMvSearch() const { return int(settings().amfFrcMvSearch); }
+QVariantList QmlPlayerBridge::amfFrcMvSearchChoices() const {
+    return {QVariantMap{{"id", "0"}, {"label", tr("自动")}},
+            QVariantMap{{"id", "1"}, {"label", tr("原生精度")}},
+            QVariantMap{{"id", "2"}, {"label", tr("性能优先")}}};
+}
+void QmlPlayerBridge::setAmfFrcMvSearch(int value) {
+    if (value < 0 || unsigned(value) >= engine::kAmfFrcMvSearchCount) return;
+    auto s = settings();
+    if (s.amfFrcMvSearch == unsigned(value)) return;
+    s.amfFrcMvSearch = unsigned(value);
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 AMF 运动搜索模式，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("amfFrcMvSearch")] = value;
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "AMF FRC MV search mode not saved");
+    emit settingsChanged();
+}
+bool QmlPlayerBridge::amfFrcUseFutureFrame() const { return settings().amfFrcUseFutureFrame; }
+void QmlPlayerBridge::setAmfFrcUseFutureFrame(bool value) {
+    auto s = settings();
+    if (s.amfFrcUseFutureFrame == value) return;
+    s.amfFrcUseFutureFrame = value;
+    if (!impl_->commit(std::move(s))) { emit notice(tr("引擎未接受 AMF 未来帧插值设置，原设置保留"), true); return; }
+    impl_->prefs[QStringLiteral("amfFrcUseFutureFrame")] = value;
+    if (!impl_->savePrefs()) veyra::log::warn("ui-prefs", "AMF FRC future frame not saved");
+    emit settingsChanged();
+}
 bool QmlPlayerBridge::dlssgLiteAvailable() const {
     static const bool present = ngx::dlssgLiteRuntimePresent(runtime::localRuntimeDirectory());
     return present;

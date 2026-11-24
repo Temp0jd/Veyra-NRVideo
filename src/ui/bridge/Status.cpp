@@ -38,6 +38,21 @@ QString QmlPlayerBridge::srStageNote() const {
     // Only the standard family restores a source already at the target size.
     if (s.applied.sr && engine::vfxVideoSr(s.applied.videoSrQuality) && !plan.srApplied)
         notes << tr("高码率和流媒体只做放大：片源已达到目标尺寸，所以没有运行；同尺寸修复请用标准。");
+    // ArtCNN is a fixed 2x model; any other ratio (or a source already enlarged
+    // past 2x by the target) falls back to the plain scale of the plan.
+    if (s.applied.sr && engine::artcnnVideoSr(s.applied.videoSrQuality) &&
+        plan.source.valid() && plan.base.valid() &&
+        (plan.base.width != plan.source.width * 2 || plan.base.height != plan.source.height * 2))
+        notes << tr("ArtCNN 2× 只做精确 2 倍放大：当前源与目标不是 2 倍比例，已退回普通缩放。");
+    // Enlarge-only spatial SR (AMF HQScaler, DirectML) has nothing to do when the
+    // source already matches the presented size, so the plan skips the pass.
+    if (s.applied.sr && (engine::amfHqVideoSr(s.applied.videoSrQuality) || engine::dmlVideoSr(s.applied.videoSrQuality)) && !plan.srApplied)
+        notes << tr("所选空间超分算法只做放大：片源已达到目标尺寸，所以没有运行。");
+    // A preset saved with double SR plus a spatial single-pass algorithm runs
+    // as a single stage (Phase 1); say so instead of silently dropping a pass.
+    if (s.applied.sr && s.applied.dualSrEnabled &&
+        (engine::spatialCnnVideoSr(s.applied.videoSrQuality) || engine::spatialCnnVideoSr(s.applied.dualSrQuality)))
+        notes << tr("所选空间超分算法暂不支持双阶段超分，已按单阶段运行。");
     return notes.join(QStringLiteral("；"));
 }
 

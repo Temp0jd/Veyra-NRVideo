@@ -62,16 +62,30 @@ std::string PresetStore::serialize()const{
         return p.settings.exclusion!=ProtectionSettings{}||std::any_of(p.settings.protection.regions.begin(),
             p.settings.protection.regions.end(),[](const auto& region){return region.ellipse;});
     });
+    // v38 appends the M1-M3 options: FSR SR version mode / reactive mask / RCAS
+    // and AMF FRC profile / motion search / future frame. Seven numbers, so an
+    // older reader would consume them as the next entry's fields: own version.
+    // Field order below is positional and must match parse() exactly.
+    const bool aiOptions=std::any_of(entries_.begin(),entries_.end(),[](const auto& p){const auto& s=p.settings;
+        return s.fsrSrVersionMode!=0||!s.fsrSrReactiveMask||s.fsrSrSharpening||s.fsrSrSharpness!=0.5f
+            ||s.amfFrcProfile!=0||s.amfFrcMvSearch!=0||s.amfFrcUseFutureFrame;
+    });
+    // v39: spatial single-frame SR (ArtCNN/AMF HQScaler/AMF VQ Enhancer/ORT-DML,
+    // IDs 24..29). No new fields: the line layout is exactly v38's, only the
+    // version header moves so a v38 reader rejects the file at validate() instead
+    // of loading an SR quality it cannot run.
+    const bool spatialSr=std::any_of(entries_.begin(),entries_.end(),[](const auto& p){
+        return spatialCnnVideoSr(p.settings.videoSrQuality)||spatialCnnVideoSr(p.settings.dualSrQuality);});
     const bool anySr=std::any_of(entries_.begin(),entries_.end(),[](const auto& p){return !rtxVideoSr(p.settings.dualSrQuality);});
     const bool videoAi=anySr||std::any_of(entries_.begin(),entries_.end(),[](const auto& p){return vfxVideoSr(p.settings.videoSrQuality)||vfxVideoSr(p.settings.dualSrQuality);});
     const bool dual=videoAi||std::any_of(entries_.begin(),entries_.end(),[](const auto& p){return p.settings.dualSrEnabled||p.settings.dualSrTarget!=pipeline::SrTarget::Uhd4K||p.settings.dualSrQuality!=kDefaultVideoSrQuality;});
-    const bool fullSchema=exclusion||fsr4||higher||rendering||vfg||correction||dlss||nrModel||srStage||dual;
-    const bool correctionExtended=exclusion||dual||srStage||nrModel||dlss||std::any_of(entries_.begin(),entries_.end(),[](const auto& p){
+    const bool fullSchema=spatialSr||aiOptions||exclusion||fsr4||higher||rendering||vfg||correction||dlss||nrModel||srStage||dual;
+    const bool correctionExtended=spatialSr||aiOptions||exclusion||dual||srStage||nrModel||dlss||std::any_of(entries_.begin(),entries_.end(),[](const auto& p){
         if(p.settings.residual.correction.extendedControls())return true;
         for(unsigned i=0;i<p.settings.nrLayerCount;++i)if(p.settings.nrLayers[i].residual.correction.extendedControls())return true;
         return false;});
     // v26 introduces appended resolution IDs; old readers reject this schema.
-    std::ostringstream o;o.imbue(std::locale::classic());o<<std::setprecision(std::numeric_limits<float>::max_digits10)<<"VEYRA_PRESETS "<<(exclusion?37:anySr?36:videoAi?35:dual?34:srStage?33:nrModel?32:dlss?31:correctionExtended?30:correction?29:vfg?28:rendering?27:higher?26:fsr4?25:hold?24:stack?23:multi?22:21)<<'\n'<<std::quoted(utf8(default_))<<' '<<entries_.size()<<'\n';
+    std::ostringstream o;o.imbue(std::locale::classic());o<<std::setprecision(std::numeric_limits<float>::max_digits10)<<"VEYRA_PRESETS "<<(spatialSr?39:aiOptions?38:exclusion?37:anySr?36:videoAi?35:dual?34:srStage?33:nrModel?32:dlss?31:correctionExtended?30:correction?29:vfg?28:rendering?27:higher?26:fsr4?25:hold?24:stack?23:multi?22:21)<<'\n'<<std::quoted(utf8(default_))<<' '<<entries_.size()<<'\n';
     for(auto& p:entries_){const auto& s=p.settings;const auto& m=s.model;const auto& r=s.residual;o<<std::quoted(utf8(p.name))<<' '<<m.intensity<<' '<<m.tone<<' '<<m.structure<<' '<<m.skin<<' '<<m.style<<' '<<m.autoMask<<' '<<m.uiCorrection<<' '<<r.total<<' '<<r.darken<<' '<<r.brighten<<' '<<r.color<<' '<<r.luminance<<' '<<s.nr<<' '<<s.sr<<' '<<s.multiplier<<' '<<int(s.nrPolicy)<<' '<<int(s.flow)<<' '<<int(s.content)<<' '<<s.protection.enabled<<' '<<s.protection.featherPixels;for(auto q:s.protection.regions){const auto box=protectionConstants(q);for(float coordinate:box)o<<' '<<coordinate;}o<<' '<<s.videoSrQuality<<' '<<int(s.frameGenerationBackend)<<' '<<int(s.srTarget)<<' '<<int(s.opticalFlowBackend)<<' '<<s.amdFlowHalfResolution<<' '<<int(s.audioSync)<<' '<<s.audioOffsetMs<<' '<<int(s.nrRuntime)<<' '<<s.captureCompatible<<' '<<s.lowLatency<<' '<<s.forceSdrPreview<<' '<<int(s.captureAudio)<<' '<<s.exportBitrateMbps<<' '<<s.captureFlipVertical<<' '<<int(s.captureBuffer)<<' ';writeColorSettings(o,s.color,utf8(s.color.lutNameString()));o<<' '<<s.videoHdr.enabled<<' '<<s.videoHdr.contrast<<' '<<s.videoHdr.saturation<<' '<<s.videoHdr.middleGray<<' '<<s.videoHdr.peakNits<<' '<<s.nrTemporal;
         if(multi||fullSchema){o<<' '<<s.additionalColorCount;for(unsigned i=0;i<s.additionalColorCount;++i){o<<' ';writeColorSettings(o,s.additionalColors[i],utf8(s.additionalColors[i].lutNameString()));}}
         if(stack||fullSchema){
@@ -90,24 +104,27 @@ std::string PresetStore::serialize()const{
         // any entry needs it. Otherwise entries in the same file would parse
         // differently.
         if(hold||fullSchema)o<<' '<<s.nrHoldStrength<<' '<<s.nrHoldTolerance;
-        if(rendering||vfg||correction||dlss||nrModel||srStage||dual||exclusion)o<<' '<<int(s.hdrOutputMode)<<' '<<int(s.fgMotion)<<' '<<int(s.srMotion)<<' '<<int(s.nrMotion);
-        if(vfg||correction||dlss||nrModel||srStage||dual||exclusion)o<<' '<<s.vfgQuality;
-        if(correction||dlss||nrModel||srStage||dual||exclusion){
+        if(rendering||vfg||correction||dlss||nrModel||srStage||dual||exclusion||aiOptions||spatialSr)o<<' '<<int(s.hdrOutputMode)<<' '<<int(s.fgMotion)<<' '<<int(s.srMotion)<<' '<<int(s.nrMotion);
+        if(vfg||correction||dlss||nrModel||srStage||dual||exclusion||aiOptions||spatialSr)o<<' '<<s.vfgQuality;
+        if(correction||dlss||nrModel||srStage||dual||exclusion||aiOptions||spatialSr){
             o<<' ';writeNrCorrection(o,s.residual.correction,correctionExtended);
             for(unsigned i=0;i<s.nrLayerCount;++i){o<<' ';writeNrCorrection(o,s.nrLayers[i].residual.correction,correctionExtended);}
         }
-        if(dlss||nrModel||srStage||dual||exclusion)o<<' '<<s.dlssSrModel;
-        if(nrModel||srStage||dual||exclusion){o<<' '<<s.model.performance;
+        if(dlss||nrModel||srStage||dual||exclusion||aiOptions||spatialSr)o<<' '<<s.dlssSrModel;
+        if(nrModel||srStage||dual||exclusion||aiOptions||spatialSr){o<<' '<<s.model.performance;
             for(unsigned i=0;i<s.nrLayerCount;++i)o<<' '<<s.nrLayers[i].model.performance;}
-        if(srStage||dual||exclusion)o<<' '<<uint32_t(s.srPrescale)<<' '<<uint32_t(s.srOutput);
-        if(dual||exclusion)o<<' '<<s.dualSrEnabled<<' '<<uint32_t(s.dualSrTarget)<<' '<<s.dualSrQuality;
-        if(exclusion){o<<' ';writeProtection(o,s.exclusion);}
+        if(srStage||dual||exclusion||aiOptions||spatialSr)o<<' '<<uint32_t(s.srPrescale)<<' '<<uint32_t(s.srOutput);
+        if(dual||exclusion||aiOptions||spatialSr)o<<' '<<s.dualSrEnabled<<' '<<uint32_t(s.dualSrTarget)<<' '<<s.dualSrQuality;
+        // version>=37 is always read in full, so a v38 line must emit it too.
+        if(exclusion||aiOptions||spatialSr){o<<' ';writeProtection(o,s.exclusion);}
+        // v38: M1-M3 options. Positional order shared with parse().
+        if(aiOptions||spatialSr)o<<' '<<s.fsrSrVersionMode<<' '<<s.fsrSrReactiveMask<<' '<<s.fsrSrSharpening<<' '<<s.fsrSrSharpness<<' '<<s.amfFrcProfile<<' '<<s.amfFrcMvSearch<<' '<<s.amfFrcUseFutureFrame;
         o<<'\n';
     }return o.str();
 }
 bool PresetStore::parse(const std::string& data,std::vector<UserPreset>& out,std::wstring& def){
     if(data.size()>kMaxPresetBytes)return false;std::istringstream in(data);in.imbue(std::locale::classic());std::string magic,d;int version=0;size_t count=0;
-    if(!(in>>magic>>version)||magic!="VEYRA_PRESETS"||(version<1||version>37)||!(in>>std::quoted(d)>>count)||count>64)return false;def=wide(d);if(!d.empty()&&def.empty())return false;
+    if(!(in>>magic>>version)||magic!="VEYRA_PRESETS"||(version<1||version>39)||!(in>>std::quoted(d)>>count)||count>64)return false;def=wide(d);if(!d.empty()&&def.empty())return false;
     for(size_t i=0;i<count;++i){UserPreset p;std::string n;int policy,flow,content,nr,sr;auto& s=p.settings;auto& m=s.model;auto& r=s.residual;
         if(!(in>>std::quoted(n)>>m.intensity>>m.tone>>m.structure>>m.skin>>m.style>>m.autoMask>>m.uiCorrection>>r.total>>r.darken>>r.brighten>>r.color>>r.luminance>>nr>>sr>>s.multiplier>>policy>>flow>>content))return false;
         if(version>=2){int enabled;if(!(in>>enabled>>s.protection.featherPixels)||enabled<0||enabled>1)return false;s.protection.enabled=enabled!=0;
@@ -185,6 +202,13 @@ bool PresetStore::parse(const std::string& data,std::vector<UserPreset>& out,std
         p.name=wide(n);if(!nameOk(p.name)||std::any_of(out.begin(),out.end(),[&](auto& a){return a.name==p.name;})||nr<0||nr>1||sr<0||sr>1)return false;
         s.nr=nr;s.sr=sr;s.nrPolicy=static_cast<pipeline::NrSizePolicy>(policy);s.flow=static_cast<FlowQuality>(flow);s.content=static_cast<ContentRate>(content);
         if(version>=37&&!readProtection(in,s.exclusion))return false;
+        // v38: M1-M3 options, same positional order as serialize(). Bounds are
+        // the ones validate() enforces for the enums and the sharpness float;
+        // the three bools are written as int 0/1.
+        if(version>=38){int mask=0,sharp=0,future=0;
+            if(!(in>>s.fsrSrVersionMode>>mask>>sharp>>s.fsrSrSharpness>>s.amfFrcProfile>>s.amfFrcMvSearch>>future)
+               ||mask<0||mask>1||sharp<0||sharp>1||future<0||future>1)return false;
+            s.fsrSrReactiveMask=mask!=0;s.fsrSrSharpening=sharp!=0;s.amfFrcUseFutureFrame=future!=0;}
         if(!s.validate().empty())return false;out.push_back(std::move(p));
     }
     in>>std::ws;if(!in.eof())return false;

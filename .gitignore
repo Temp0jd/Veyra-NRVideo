@@ -6,6 +6,9 @@
 /third_party_local/
 /reference_local/
 
+# Local agent/editor state (never part of the product source)
+/.pi/
+
 # Build outputs and local presets
 /out/
 /build/

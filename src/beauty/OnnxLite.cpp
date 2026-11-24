@@ -94,6 +94,13 @@ bool parseTensor(Reader r, OnnxTensor& t, std::string& error)
         else if (!r.skip(wire)) break;
     }
     if (r.bad) { error = "malformed tensor"; return false; }
+    // Only float32 and int64 payloads are understood. Rejecting the rest here (instead of
+    // silently leaving the tensor empty) keeps a half-decoded model from reaching a backend:
+    // a float16 initializer would otherwise look like a zero-filled tensor.
+    if (t.dataType == 10) {
+        error = "initializer " + t.name + " uses float16; only float32/int64 are supported";
+        return false;
+    }
     if (hasRaw) {
         if (t.dataType == 1) {
             if (raw.size() % 4) { error = "float tensor raw_data size"; return false; }

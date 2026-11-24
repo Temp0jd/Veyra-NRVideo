@@ -1560,6 +1560,55 @@ VPage {
                         onPicked: id => veyra.dlssSrModel = Number(id)
                     }
                 }
+                VRow {
+                    label: qsTr("FSR 版本")
+                    hint: qsTr("自动优先选用 FSR 4 并按硬件回退 FSR 3.x；强制选档若不支持会提示回退")
+                    visible: veyra.videoSrQuality === 5 || (veyra.dualSrEnabled && veyra.dualSrQuality === 5)
+                    enabled: Support.available(veyra, "sr5")
+                    VSelect {
+                        objectName: "node-fsr-sr-version-mode"
+                        options: veyra.fsrSrVersionModeChoices || []
+                        value: options.find(o => o.id === String(veyra.fsrSrVersionMode))?.label || ""
+                        onPicked: id => veyra.fsrSrVersionMode = Number(id)
+                    }
+                }
+                VRow {
+                    label: qsTr("FSR 反应遮罩")
+                    hint: qsTr("自动标记重影、光流切变和静态 HUD 像素，减少 2D 画面拖影 · 默认开启")
+                    visible: veyra.videoSrQuality === 5 || (veyra.dualSrEnabled && veyra.dualSrQuality === 5)
+                    enabled: Support.available(veyra, "sr5")
+                    VSwitch {
+                        objectName: "node-fsr-sr-reactive-mask"
+                        checked: veyra.fsrSrReactiveMask
+                        onToggled: checked => veyra.fsrSrReactiveMask = checked
+                    }
+                }
+                VRow {
+                    label: qsTr("FSR RCAS 锐化")
+                    hint: qsTr("启用 FSR 内置对比度自适应锐化 · 默认关闭")
+                    visible: veyra.videoSrQuality === 5 || (veyra.dualSrEnabled && veyra.dualSrQuality === 5)
+                    enabled: Support.available(veyra, "sr5")
+                    VSwitch {
+                        objectName: "node-fsr-sr-sharpening"
+                        checked: veyra.fsrSrSharpening
+                        onToggled: checked => veyra.fsrSrSharpening = checked
+                    }
+                }
+                VRow {
+                    label: qsTr("RCAS 锐化强度")
+                    visible: (veyra.videoSrQuality === 5 || (veyra.dualSrEnabled && veyra.dualSrQuality === 5)) && veyra.fsrSrSharpening
+                    enabled: Support.available(veyra, "sr5")
+                    value: Math.round(veyra.fsrSrSharpness * 100) + "%"
+                    VSlider {
+                        objectName: "node-fsr-sr-sharpness"
+                        implicitWidth: 110
+                        valueFromModel: true
+                        resettable: true; defaultValue: 0.5
+                        from: 0.0; to: 1.0; inputScale: 100
+                        value: veyra.fsrSrSharpness
+                        onMoved: value => veyra.fsrSrSharpness = value
+                    }
+                }
                 SrStageEditor { Layout.fillWidth: true; namePrefix: "node" }
 
 
@@ -1688,6 +1737,34 @@ VPage {
                     opacity: enabled ? 1 : 0.5
                     hint: qsTr("实时采集 2X 时，当前档来不及赶上屏幕刷新，这一对帧就改用下一档，不丢帧也不加延迟。多占约 2 GB 显存，显存不够时不生效")
                     VSwitch { objectName: "node-vfg-auto-regulate"; checked: veyra.vfgAutoRegulate; onToggled: checked => veyra.vfgAutoRegulate = checked }
+                }
+                VRow {
+                    label: qsTr("AMF FRC 质量档")
+                    visible: veyra.fgBackendName === "amdfrc"
+                    hint: qsTr("控制 AMF 帧速率转换器质量档位 · 默认自动")
+                    VSelect {
+                        objectName: "node-amf-frc-profile"
+                        options: veyra.amfFrcProfileChoices || []
+                        value: options.find(o => o.id === String(veyra.amfFrcProfile))?.label || ""
+                        onPicked: id => veyra.amfFrcProfile = Number(id)
+                    }
+                }
+                VRow {
+                    label: qsTr("AMF 运动搜索")
+                    visible: veyra.fgBackendName === "amdfrc"
+                    hint: qsTr("原生精度画质更稳，性能优先更省 GPU · 默认自动")
+                    VSelect {
+                        objectName: "node-amf-frc-mv-search"
+                        options: veyra.amfFrcMvSearchChoices || []
+                        value: options.find(o => o.id === String(veyra.amfFrcMvSearch))?.label || ""
+                        onPicked: id => veyra.amfFrcMvSearch = Number(id)
+                    }
+                }
+                VRow {
+                    label: qsTr("AMF 未来帧插值")
+                    visible: veyra.fgBackendName === "amdfrc"
+                    hint: qsTr("允许参考后一帧改善运动连续性，会增加约一帧延迟 · 默认关闭")
+                    VSwitch { objectName: "node-amf-frc-future-frame"; checked: veyra.amfFrcUseFutureFrame; onToggled: checked => veyra.amfFrcUseFutureFrame = checked }
                 }
                 VRow {
                     label: qsTr("自适应倍率")

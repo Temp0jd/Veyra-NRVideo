@@ -1,6 +1,7 @@
 #include "veyra/engine/EnhancementSettings.h"
 #include "veyra/engine/FrameGenerationSelection.h"
 #include "veyra/engine/BackendRecovery.h"
+#include "veyra/engine/GraphDescription.h"
 #include "veyra/engine/DisplayFgBudget.h"
 #include "veyra/engine/ExportFeaturePolicy.h"
 #include "veyra/diagnostics/DiagnosticEvent.h"
@@ -126,6 +127,84 @@ int main(){
         s.videoSrQuality=2;
         check(engine::nvidiaOnlyStagesRequested(false,s.sr,false,s,true),"RTX Video SR is an NVIDIA-only stage");
         check(engine::nvidiaOnlyStagesRequested(true,false,false,s,false)&&!engine::nvidiaOnlyStagesRequested(true,false,false,s,true),"NR is NVIDIA-only except on the AMD runtime");
+    }
+    {
+        // Phase-1 spatial single-frame SR (24/25 ArtCNN, 26/27 AMF video SR,
+        // 28/29 DirectML). None of them runs on NGX, so adapter normalization
+        // keeps them where their own runtime can: every adapter for ArtCNN and
+        // DirectML, an AMD adapter for the AMF component. Only DLSS and RTX
+        // Video SR stay NVIDIA-only.
+        for(const uint32_t quality:{24u,25u,26u,27u,28u,29u}){
+            engine::EnhancementSettings amd;amd.nr=false;amd.sr=true;amd.videoSrQuality=quality;
+            check(!engine::disableUnsupportedNvidiaEffects(amd,false,true)&&amd.sr,"AMD normalization keeps a Phase-1 spatial SR backend");
+            check(!engine::nvidiaOnlyStagesRequested(false,true,false,amd,true),"spatial SR is not an NVIDIA-only stage on AMD");
+        }
+        for(const uint32_t quality:{24u,25u,28u,29u}){
+            engine::EnhancementSettings other;other.nr=false;other.sr=true;other.videoSrQuality=quality;
+            check(!engine::disableUnsupportedNvidiaEffects(other,false,false)&&other.sr,"ArtCNN and DirectML SR survive on a non-NVIDIA non-AMD adapter");
+            check(!engine::nvidiaOnlyStagesRequested(false,true,false,other,false),"ArtCNN and DirectML SR are not NVIDIA-only stages");
+        }
+        for(const uint32_t quality:{26u,27u}){
+            engine::EnhancementSettings intel;intel.nr=false;intel.sr=true;intel.videoSrQuality=quality;
+            check(engine::disableUnsupportedNvidiaEffects(intel,false,false)&&!intel.sr,"AMF video SR needs an AMD adapter");
+            check(engine::nvidiaOnlyStagesRequested(false,true,false,intel,false),"AMF video SR is not offered on a non-AMD adapter");
+            check(!engine::nvidiaOnlyStagesRequested(false,true,false,intel,true),"AMF video SR is offered on an AMD adapter");
+        }
+        for(const uint32_t quality:{24u,25u,26u,27u,28u,29u}){
+            engine::EnhancementSettings nvidia;nvidia.nr=false;nvidia.sr=true;nvidia.videoSrQuality=quality;
+            check(!engine::disableUnsupportedNvidiaEffects(nvidia,true,false)&&nvidia.sr,"NVIDIA normalization leaves a spatial SR backend on");
+        }
+        for(const uint32_t quality:{0u,2u,16u,21u}){
+            engine::EnhancementSettings other;other.nr=false;other.sr=true;other.videoSrQuality=quality;
+            check(engine::disableUnsupportedNvidiaEffects(other,false,false)&&!other.sr,"DLSS and RTX Video SR still need NVIDIA");
+            check(engine::nvidiaOnlyStagesRequested(false,true,false,other,false),"DLSS and RTX Video SR are NVIDIA-only stages");
+        }
+        // A lost NGX core takes only the NGX-backed SR with it: the four spatial
+        // families keep their own runtimes and stay selected.
+        for(const uint32_t quality:{24u,25u,26u,27u,28u,29u}){
+            engine::EnhancementSettings recovered;recovered.nr=true;recovered.sr=true;recovered.videoSrQuality=quality;
+            check(engine::disableFailedBackend(recovered,engine::FailedBackend::NgxCore)&&!recovered.nr&&recovered.sr,"NGX core failure keeps a spatial SR backend");
+        }
+        // The spatial stages are single pass on every adapter, so a saved second
+        // pass never activates one; the control shows the same settings still
+        // produce double SR for a temporal base.
+        {
+            const auto describe=[&](uint32_t quality,bool nvidia){
+                engine::EnhancementSettings s;s.sr=true;s.videoSrQuality=quality;
+                s.dualSrEnabled=true;s.dualSrQuality=engine::kVideoSrFsr;s.srPrescale=pipeline::SrPrescale::P1080;
+                engine::StageRequest request;request.sr=true;request.width=1920;request.height=1080;request.nvidiaAdapter=nvidia;
+                pipeline::EnhanceGraphDesc desc;engine::describeStages(request,s,desc);
+                return desc.dualSr;
+            };
+            check(describe(0,true),"control: a DLSS SR base with a saved second pass still runs double SR");
+            for(const uint32_t quality:{24u,25u,26u,27u,28u,29u}){
+                check(!describe(quality,true),"a spatial SR base never runs double SR on NVIDIA");
+                check(!describe(quality,false),"a spatial SR base never runs double SR on a non-NVIDIA adapter");
+            }
+        }
+        // describeStages adapter gating: AMF video SR (26/27) is AMD-only even on
+        // NVIDIA or Intel, and must stay enabled on an AMD export where amdNr=false.
+        {
+            const auto srEnabledFor=[&](uint32_t quality,uint32_t w,uint32_t h,bool nvidia,bool amdAdapter,bool amdNr){
+                engine::EnhancementSettings s;s.sr=true;s.videoSrQuality=quality;s.srTarget=pipeline::SrTarget::Uhd4K;
+                engine::StageRequest r;r.sr=true;r.width=w;r.height=h;r.nvidiaAdapter=nvidia;r.amdAdapter=amdAdapter;r.amdNr=amdNr;
+                pipeline::EnhanceGraphDesc d;engine::describeStages(r,s,d);
+                return d.enableSr;
+            };
+            // AMF HQScaler (26) & AMF VQEnhancer (27): AMD only (even if amdNr is false, e.g. export without AMD NR).
+            check(!srEnabledFor(26u,1920,1080,true,false,false),"AMF HQScaler is not enabled on NVIDIA");
+            check(!srEnabledFor(26u,1920,1080,false,false,false),"AMF HQScaler is not enabled on Intel");
+            check(srEnabledFor(26u,1920,1080,false,true,false),"AMF HQScaler is enabled on AMD even when amdNr=false");
+            check(!srEnabledFor(27u,3840,2160,true,false,false),"AMF VQEnhancer 1x is not enabled on NVIDIA");
+            check(!srEnabledFor(27u,3840,2160,false,false,false),"AMF VQEnhancer 1x is not enabled on Intel");
+            check(srEnabledFor(27u,3840,2160,false,true,false),"AMF VQEnhancer 1x is enabled on AMD even when amdNr=false");
+            // ArtCNN (24/25) & DirectML (28/29): vendor neutral on NVIDIA, AMD, and Intel.
+            for(const uint32_t quality:{24u,25u,28u,29u}){
+                check(srEnabledFor(quality,1920,1080,true,false,false),"vendor-neutral spatial SR enabled on NVIDIA");
+                check(srEnabledFor(quality,1920,1080,false,true,false),"vendor-neutral spatial SR enabled on AMD");
+                check(srEnabledFor(quality,1920,1080,false,false,false),"vendor-neutral spatial SR enabled on Intel");
+            }
+        }
     }
     {
         engine::EnhancementSettings requested;requested.nr=requested.sr=true;requested.multiplier=2;requested.audioOffsetMs=37;

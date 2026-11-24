@@ -616,6 +616,12 @@ bool QmlPlayerBridge::resetNode(uint id) {
         impl_->draftGlobals.srPrescale = defaults.srPrescale;
         impl_->draftGlobals.srOutput = defaults.srOutput;
         impl_->draftGlobals.dualSrEnabled=false;impl_->draftGlobals.dualSrTarget=defaults.dualSrTarget;impl_->draftGlobals.dualSrQuality=defaults.dualSrQuality;
+        auto resetPending = impl_->facade.pendingSettings();
+        resetPending.fsrSrVersionMode = defaults.fsrSrVersionMode;
+        resetPending.fsrSrReactiveMask = defaults.fsrSrReactiveMask;
+        resetPending.fsrSrSharpening = defaults.fsrSrSharpening;
+        resetPending.fsrSrSharpness = defaults.fsrSrSharpness;
+        impl_->facade.setPending(std::move(resetPending));
     }
     if (!impl_->revalidate(true, &previous)) {
         const auto error = impl_->validation.message; node = before;

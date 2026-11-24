@@ -320,6 +320,43 @@ QmlPlayerBridge::QmlPlayerBridge(engine::EngineController& engine, std::filesyst
             const bool on = p.value(QStringLiteral("hudLock")).toBool();
             if (s.hudLock != on) { s.hudLock = on; changed = true; }
         }
+        if (p.contains(QStringLiteral("fsrSrVersionMode"))) {
+            const int mode = p.value(QStringLiteral("fsrSrVersionMode")).toInt();
+            if (mode >= 0 && unsigned(mode) < engine::kFsrSrVersionModeCount && s.fsrSrVersionMode != unsigned(mode)) {
+                s.fsrSrVersionMode = unsigned(mode); changed = true;
+            }
+        }
+        if (p.contains(QStringLiteral("fsrSrReactiveMask"))) {
+            const bool on = p.value(QStringLiteral("fsrSrReactiveMask")).toBool();
+            if (s.fsrSrReactiveMask != on) { s.fsrSrReactiveMask = on; changed = true; }
+        }
+        if (p.contains(QStringLiteral("fsrSrSharpening"))) {
+            const bool on = p.value(QStringLiteral("fsrSrSharpening")).toBool();
+            if (s.fsrSrSharpening != on) { s.fsrSrSharpening = on; changed = true; }
+        }
+        if (p.contains(QStringLiteral("fsrSrSharpness"))) {
+            bool ok = false;
+            const double val = p.value(QStringLiteral("fsrSrSharpness")).toDouble(&ok);
+            if (ok && std::isfinite(val) && val >= 0.0 && val <= 1.0 && s.fsrSrSharpness != float(val)) {
+                s.fsrSrSharpness = float(val); changed = true;
+            }
+        }
+        if (p.contains(QStringLiteral("amfFrcProfile"))) {
+            const int prof = p.value(QStringLiteral("amfFrcProfile")).toInt();
+            if (prof >= 0 && unsigned(prof) < engine::kAmfFrcProfileCount && s.amfFrcProfile != unsigned(prof)) {
+                s.amfFrcProfile = unsigned(prof); changed = true;
+            }
+        }
+        if (p.contains(QStringLiteral("amfFrcMvSearch"))) {
+            const int mv = p.value(QStringLiteral("amfFrcMvSearch")).toInt();
+            if (mv >= 0 && unsigned(mv) < engine::kAmfFrcMvSearchCount && s.amfFrcMvSearch != unsigned(mv)) {
+                s.amfFrcMvSearch = unsigned(mv); changed = true;
+            }
+        }
+        if (p.contains(QStringLiteral("amfFrcUseFutureFrame"))) {
+            const bool on = p.value(QStringLiteral("amfFrcUseFutureFrame")).toBool();
+            if (s.amfFrcUseFutureFrame != on) { s.amfFrcUseFutureFrame = on; changed = true; }
+        }
         if (!defaultFlowApplied && p.contains(QStringLiteral("contentRate"))) {
             const int rate = p.value(QStringLiteral("contentRate")).toInt();
             if(rate>=0&&rate<=int(engine::ContentRate::Capture60To30)){

@@ -901,6 +901,13 @@ void EngineController::run(HWND window,std::wstring path,PlayerOptions options,s
                         // (missing local runtime, unsupported layout) degrades
                         // to the plain scale path with a visible warning.
                         if(opened&&graph->fsrSrRequested()&&!graph->fsrSrEnabled()){opened=false;failure=FailedBackend::Sr;}
+                        // Same contract for the Phase-1 spatial SR stages: a
+                        // missing model file, AMF component or DirectML runtime
+                        // is a visible SR degradation, not a broken graph.
+                        if(opened&&graph->artcnnSrRequested()&&!graph->artcnnSrEnabled()){opened=false;failure=FailedBackend::Sr;}
+                        if(opened&&graph->amfHqSrRequested()&&!graph->amfHqSrEnabled()){opened=false;failure=FailedBackend::Sr;}
+                        if(opened&&graph->amfVqSrRequested()&&!graph->amfVqSrEnabled()){opened=false;failure=FailedBackend::Sr;}
+                        if(opened&&graph->ortDmlSrRequested()&&!graph->ortDmlSrEnabled()){opened=false;failure=FailedBackend::Sr;}
                     }
                 if(stop_)return false;
                 if(opened){

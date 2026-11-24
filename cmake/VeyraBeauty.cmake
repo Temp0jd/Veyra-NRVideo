@@ -7,8 +7,10 @@
 # SkinSoft (yasunari01/obs-filters fd5690f,
 # GPL-2.0-or-later) and GPUPixel (pixpark/gpupixel ef552bf, Apache-2.0). Details
 # per file: THIRD_PARTY_NOTICES.md.
+# The ONNX-lite helper lives in the unconditional veyra_pipeline source list in
+# CMakeLists.txt: the spatial ArtCNN backend links it even in no-FFmpeg builds,
+# so it must not be gated behind this FFmpeg-only file.
 target_sources(veyra_pipeline PRIVATE
-  src/beauty/OnnxLite.cpp
   src/beauty/TfliteLite.cpp
   src/beauty/YuNetGpu.cpp
   src/beauty/FaceMeshGpu.cpp

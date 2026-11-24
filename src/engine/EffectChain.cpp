@@ -637,6 +637,9 @@ ChainGlobalSettings ChainGlobalSettings::capture(const EnhancementSettings& s) {
     c.srTarget = s.srTarget; c.videoSrQuality = s.videoSrQuality; c.dlssSrModel = s.dlssSrModel;
     c.srPrescale = s.srPrescale; c.srOutput = s.srOutput;
     c.dualSrEnabled=s.dualSrEnabled;c.dualSrTarget=s.dualSrTarget;c.dualSrQuality=s.dualSrQuality;
+    c.fsrSrVersionMode=s.fsrSrVersionMode;c.fsrSrReactiveMask=s.fsrSrReactiveMask;c.fsrSrSharpening=s.fsrSrSharpening;
+    c.fsrSrSharpness=s.fsrSrSharpness;c.amfFrcProfile=s.amfFrcProfile;c.amfFrcMvSearch=s.amfFrcMvSearch;
+    c.amfFrcUseFutureFrame=s.amfFrcUseFutureFrame;
     c.fgBackend = s.frameGenerationBackend; c.flow = s.flow;
     c.vfgQuality=s.vfgQuality;
     c.opticalFlowBackend = s.opticalFlowBackend; c.amdFlowHalfResolution = s.amdFlowHalfResolution;
@@ -653,6 +656,9 @@ void ChainGlobalSettings::apply(EnhancementSettings& s) const {
     s.srTarget = srTarget; s.videoSrQuality = videoSrQuality; s.dlssSrModel = dlssSrModel;
     s.srPrescale = srPrescale; s.srOutput = srOutput;
     s.dualSrEnabled=dualSrEnabled;s.dualSrTarget=dualSrTarget;s.dualSrQuality=dualSrQuality;
+    s.fsrSrVersionMode=fsrSrVersionMode;s.fsrSrReactiveMask=fsrSrReactiveMask;s.fsrSrSharpening=fsrSrSharpening;
+    s.fsrSrSharpness=fsrSrSharpness;s.amfFrcProfile=amfFrcProfile;s.amfFrcMvSearch=amfFrcMvSearch;
+    s.amfFrcUseFutureFrame=amfFrcUseFutureFrame;
     s.frameGenerationBackend = fgBackend; s.flow = flow;
     s.vfgQuality=vfgQuality;
     s.opticalFlowBackend = opticalFlowBackend; s.amdFlowHalfResolution = amdFlowHalfResolution;
@@ -675,6 +681,12 @@ bool ChainConfiguration::operator==(const ChainConfiguration& other) const {
     return chain == other.chain && srTarget == other.srTarget && videoSrQuality == other.videoSrQuality && dlssSrModel == other.dlssSrModel &&
         srPrescale == other.srPrescale && srOutput == other.srOutput &&
         dualSrEnabled==other.dualSrEnabled&&dualSrTarget==other.dualSrTarget&&dualSrQuality==other.dualSrQuality&&
+        // Same blind spot for the M1-M3 options: without these comparisons a
+        // change to only FSR/AMF settings compared equal and was not persisted.
+        fsrSrVersionMode == other.fsrSrVersionMode && fsrSrReactiveMask == other.fsrSrReactiveMask &&
+        fsrSrSharpening == other.fsrSrSharpening && fsrSrSharpness == other.fsrSrSharpness &&
+        amfFrcProfile == other.amfFrcProfile && amfFrcMvSearch == other.amfFrcMvSearch &&
+        amfFrcUseFutureFrame == other.amfFrcUseFutureFrame &&
         fgBackend == other.fgBackend && vfgQuality == other.vfgQuality && flow == other.flow && opticalFlowBackend == other.opticalFlowBackend &&
         amdFlowHalfResolution == other.amdFlowHalfResolution && nrPolicy == other.nrPolicy &&
         // The author's own rendering globals had the same blind spot: a change to
@@ -780,6 +792,7 @@ bool requiresGraphRebuild(const EnhancementSettings& savedPrevious, const Enhanc
     if(previous.dualSrEnabled!=next.dualSrEnabled||previous.dualSrTarget!=next.dualSrTarget||previous.dualSrQuality!=next.dualSrQuality)return true;
     // A different DLSS SR model (render preset) needs a new SR feature.
     if (previous.dlssSrModel != next.dlssSrModel) return true;
+    if (previous.fsrSrVersionMode != next.fsrSrVersionMode || previous.fsrSrReactiveMask != next.fsrSrReactiveMask) return true;
     if (previous.frameGenerationBackend != next.frameGenerationBackend) return true;
     if (previous.vfgQuality != next.vfgQuality) return true;
     if (previous.opticalFlowBackend != next.opticalFlowBackend) return true;
@@ -787,6 +800,8 @@ bool requiresGraphRebuild(const EnhancementSettings& savedPrevious, const Enhanc
     if (previous.fgMotionRefine != next.fgMotionRefine) return true;
     if (previous.dlssgLite != next.dlssgLite) return true;
     if (previous.vfgAutoRegulate != next.vfgAutoRegulate) return true;
+    if (previous.amfFrcProfile != next.amfFrcProfile || previous.amfFrcMvSearch != next.amfFrcMvSearch ||
+        previous.amfFrcUseFutureFrame != next.amfFrcUseFutureFrame) return true;
     // Live HUD Lock owns its mask and compose passes (pipeline/HudLock.h).
     if (previous.multiplier > 1 && next.multiplier > 1 && previous.hudLock != next.hudLock) return true;
     if (previous.flow != next.flow) return true;

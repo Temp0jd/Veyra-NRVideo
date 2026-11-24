@@ -428,6 +428,11 @@ class QmlPlayerBridge : public QObject {
     Q_PROPERTY(int videoSrQuality READ videoSrQuality WRITE setVideoSrQuality NOTIFY settingsChanged)
     Q_PROPERTY(int dlssSrModel READ dlssSrModel WRITE setDlssSrModel NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList dlssSrModelChoices READ dlssSrModelChoices CONSTANT)
+    Q_PROPERTY(int fsrSrVersionMode READ fsrSrVersionMode WRITE setFsrSrVersionMode NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList fsrSrVersionModeChoices READ fsrSrVersionModeChoices CONSTANT)
+    Q_PROPERTY(bool fsrSrReactiveMask READ fsrSrReactiveMask WRITE setFsrSrReactiveMask NOTIFY settingsChanged)
+    Q_PROPERTY(bool fsrSrSharpening READ fsrSrSharpening WRITE setFsrSrSharpening NOTIFY settingsChanged)
+    Q_PROPERTY(double fsrSrSharpness READ fsrSrSharpness WRITE setFsrSrSharpness NOTIFY settingsChanged)
     // Three-step SR (RTX Video SR). srPrescale: 0 off, 1..4 720p/900p/1080p/1440p,
     // 150..190 a manual 50..90 %. srOutput: 0 keep the SR result, 1 source size, 2..6 2K/4K/5K/6K/7K.
     Q_PROPERTY(int srPrescale READ srPrescale WRITE setSrPrescale NOTIFY settingsChanged)
@@ -477,6 +482,11 @@ class QmlPlayerBridge : public QObject {
     Q_PROPERTY(bool fgAdaptive READ fgAdaptive WRITE setFgAdaptive NOTIFY settingsChanged)
     Q_PROPERTY(bool pacingRepair READ pacingRepair WRITE setPacingRepair NOTIFY settingsChanged)
     Q_PROPERTY(bool hudLock READ hudLock WRITE setHudLock NOTIFY settingsChanged)
+    Q_PROPERTY(int amfFrcProfile READ amfFrcProfile WRITE setAmfFrcProfile NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList amfFrcProfileChoices READ amfFrcProfileChoices CONSTANT)
+    Q_PROPERTY(int amfFrcMvSearch READ amfFrcMvSearch WRITE setAmfFrcMvSearch NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantList amfFrcMvSearchChoices READ amfFrcMvSearchChoices CONSTANT)
+    Q_PROPERTY(bool amfFrcUseFutureFrame READ amfFrcUseFutureFrame WRITE setAmfFrcUseFutureFrame NOTIFY settingsChanged)
     Q_PROPERTY(bool dlssgLiteAvailable READ dlssgLiteAvailable CONSTANT)
     Q_PROPERTY(QString dlssgLiteHint READ dlssgLiteHint NOTIFY snapshotChanged)
     Q_PROPERTY(int contentRate READ contentRate WRITE setContentRate NOTIFY settingsChanged)
@@ -1114,6 +1124,15 @@ public:
     int dlssSrModel() const;
     void setDlssSrModel(int value);
     QVariantList dlssSrModelChoices() const;
+    int fsrSrVersionMode() const;
+    void setFsrSrVersionMode(int value);
+    QVariantList fsrSrVersionModeChoices() const;
+    bool fsrSrReactiveMask() const;
+    void setFsrSrReactiveMask(bool value);
+    bool fsrSrSharpening() const;
+    void setFsrSrSharpening(bool value);
+    double fsrSrSharpness() const;
+    void setFsrSrSharpness(double value);
     int srPrescale() const;
     bool dualSrEnabled() const;
     void setDualSrEnabled(bool enabled);
@@ -1183,6 +1202,14 @@ public:
     void setPacingRepair(bool value);
     bool hudLock() const;
     void setHudLock(bool value);
+    int amfFrcProfile() const;
+    void setAmfFrcProfile(int value);
+    QVariantList amfFrcProfileChoices() const;
+    int amfFrcMvSearch() const;
+    void setAmfFrcMvSearch(int value);
+    QVariantList amfFrcMvSearchChoices() const;
+    bool amfFrcUseFutureFrame() const;
+    void setAmfFrcUseFutureFrame(bool value);
     bool dlssgLiteAvailable() const;
     QString dlssgLiteHint() const;
     int contentRate() const;

@@ -1561,6 +1561,19 @@
    "ru": "8-значный код сопряжения"
   },
   {
+   "zh": "AMD AMF 画质增强",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "AMD AMF 畫質增強",
+   "en": "AMD AMF quality enhancement",
+   "ja": "AMD AMF 画質強化",
+   "ko": "AMD AMF 화질 개선",
+   "es": "Mejora de calidad AMD AMF",
+   "fr": "Amélioration de qualité AMD AMF",
+   "de": "AMD AMF Qualitätsverbesserung",
+   "pt-BR": "Melhoria de qualidade AMD AMF",
+   "ru": "Улучшение качества AMD AMF"
+  },
+  {
    "zh": "AMD FRC · 视频补帧 · 2X",
    "src": "src/ui/bridge/FrameGeneration.cpp",
    "zh-TW": "AMD FRC · 影片補幀 · 2X",
@@ -1717,6 +1730,45 @@
    "ru": "Интерполяция видеокадра, встроенная в драйвер AMD (AMF FRC); он оценивает движение только с двух изображений, зафиксированных в 2X"
   },
   {
+   "zh": "AMF FRC 质量档",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "AMF FRC 品質檔",
+   "en": "AMF FRC quality profile",
+   "ja": "AMF FRC 品質プロファイル",
+   "ko": "AMF FRC 품질 프로필",
+   "es": "Perfil de calidad AMF FRC",
+   "fr": "Profil de qualité AMF FRC",
+   "de": "AMF-FRC-Qualitätsprofil",
+   "pt-BR": "Perfil de qualidade do AMF FRC",
+   "ru": "Профиль качества AMF FRC"
+  },
+  {
+   "zh": "AMF 未来帧插值",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "AMF 未來幀插值",
+   "en": "AMF future frame interpolation",
+   "ja": "AMF 将来フレーム補間",
+   "ko": "AMF 미래 프레임 보간",
+   "es": "Interpolación con fotograma futuro AMF",
+   "fr": "Interpolation avec image future AMF",
+   "de": "AMF-Interpolation mit zukünftigem Frame",
+   "pt-BR": "Interpolação com quadro futuro do AMF",
+   "ru": "Интерполяция с будущим кадром AMF"
+  },
+  {
+   "zh": "AMF 运动搜索",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "AMF 運動搜尋",
+   "en": "AMF motion search",
+   "ja": "AMF 動き探索",
+   "ko": "AMF 움직임 탐색",
+   "es": "Búsqueda de movimiento AMF",
+   "fr": "Recherche de mouvement AMF",
+   "de": "AMF-Bewegungssuche",
+   "pt-BR": "Busca de movimento do AMF",
+   "ru": "Поиск движения AMF"
+  },
+  {
    "zh": "ANR FG（极差质量） · 本地实验",
    "src": "src/ui/bridge/FrameGeneration.cpp",
    "zh-TW": "ANR FG（極差品質） · 本機實驗",
@@ -1767,6 +1819,45 @@
    "de": "Apex Neural Rendering · 2X-6X · Geschätzte Videoeingänge; Qualität und Geschwindigkeit hängen von den tatsächlichen Ergebnissen ab",
    "pt-BR": "Apex Neural Rendering · 2X-6X · Entradas de vídeo estimadas; qualidade e velocidade dependem dos resultados reais",
    "ru": "Apex Neural Rendering · 2X-6X · Оценка видеозаписей; качество и скорость зависят от фактических результатов"
+  },
+  {
+   "zh": "ArtCNN 2× 只做精确 2 倍放大：当前源与目标不是 2 倍比例，已退回普通缩放。",
+   "src": "src/ui/bridge/Status.cpp",
+   "zh-TW": "ArtCNN 2× 只做精確 2 倍放大：目前來源與目標不是 2 倍比例，已退回一般縮放。",
+   "en": "ArtCNN 2× only performs an exact 2× enlargement: the source and the target are not in a 2× ratio, so plain scaling was used instead.",
+   "ja": "ArtCNN 2× は正確な 2 倍拡大専用です。ソースと目標が 2 倍の比率ではないため、通常の拡大に切り替えました。",
+   "ko": "ArtCNN 2×는 정확한 2배 확대 전용입니다. 원본과 목표가 2배 비율이 아니어서 일반 확대로 대체했습니다.",
+   "es": "ArtCNN 2× solo hace un aumento exacto de 2×: el origen y el objetivo no están en proporción 2×, así que se usó el escalado normal.",
+   "fr": "ArtCNN 2× ne fait qu'un agrandissement exact de 2× : la source et la cible ne sont pas dans un rapport de 2×, l'échelle simple a donc été utilisée.",
+   "de": "ArtCNN 2× führt nur eine exakte 2×-Vergrößerung aus: Quelle und Ziel stehen nicht im Verhältnis 2×, daher wurde die einfache Skalierung verwendet.",
+   "pt-BR": "O ArtCNN 2× só faz um aumento exato de 2×: a origem e o alvo não estão em proporção de 2×, então foi usada a escala simples.",
+   "ru": "ArtCNN 2× выполняет только точное увеличение в 2×: источник и цель не имеют соотношения 2×, поэтому применено обычное масштабирование."
+  },
+  {
+   "zh": "ArtCNN C4F16 · 2× 超分",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "ArtCNN C4F16 · 2× 超解析",
+   "en": "ArtCNN C4F16 · 2× SR",
+   "ja": "ArtCNN C4F16 · 2× 超解像",
+   "ko": "ArtCNN C4F16 · 2× 초해상도",
+   "es": "ArtCNN C4F16 · SR 2×",
+   "fr": "ArtCNN C4F16 · SR 2×",
+   "de": "ArtCNN C4F16 · 2× SR",
+   "pt-BR": "ArtCNN C4F16 · SR 2×",
+   "ru": "ArtCNN C4F16 · SR 2×"
+  },
+  {
+   "zh": "ArtCNN C4F32 · 2× 超分",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "ArtCNN C4F32 · 2× 超解析",
+   "en": "ArtCNN C4F32 · 2× SR",
+   "ja": "ArtCNN C4F32 · 2× 超解像",
+   "ko": "ArtCNN C4F32 · 2× 초해상도",
+   "es": "ArtCNN C4F32 · SR 2×",
+   "fr": "ArtCNN C4F32 · SR 2×",
+   "de": "ArtCNN C4F32 · 2× SR",
+   "pt-BR": "ArtCNN C4F32 · SR 2×",
+   "ru": "ArtCNN C4F32 · SR 2×"
   },
   {
    "zh": "BMD HDR 帧的 EOTF 不受支持；仅接受 SDR、PQ 或 HLG，拒绝猜测颜色传递",
@@ -2315,6 +2406,32 @@
    "ru": "DXGI - это режим, совместимый с дисплеем, без указателя мыши. Захват дисплея не показывает желтой границы, а сама Veyra остается вне скриншотов и записей"
   },
   {
+   "zh": "DirectML · RealPLKSR 超分",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "DirectML · RealPLKSR 超解析",
+   "en": "DirectML · RealPLKSR SR",
+   "ja": "DirectML · RealPLKSR 超解像",
+   "ko": "DirectML · RealPLKSR 초해상도",
+   "es": "DirectML · SR RealPLKSR",
+   "fr": "DirectML · SR RealPLKSR",
+   "de": "DirectML · RealPLKSR SR",
+   "pt-BR": "DirectML · SR RealPLKSR",
+   "ru": "DirectML · RealPLKSR SR"
+  },
+  {
+   "zh": "DirectML · SPAN 超分",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "DirectML · SPAN 超解析",
+   "en": "DirectML · SPAN SR",
+   "ja": "DirectML · SPAN 超解像",
+   "ko": "DirectML · SPAN 초해상도",
+   "es": "DirectML · SR SPAN",
+   "fr": "DirectML · SR SPAN",
+   "de": "DirectML · SPAN SR",
+   "pt-BR": "DirectML · SR SPAN",
+   "ru": "DirectML · SPAN SR"
+  },
+  {
    "zh": "Dolby / DTS 位流",
    "src": "qml/CaptureSourceDialog.qml",
    "zh-TW": "Dolby / DTS 位流",
@@ -2521,6 +2638,45 @@
    "de": "FSR 4 ML benötigt einen unterstützten RX 9000 und Treiber und wechselt zu FSR 3.1, wenn er nicht verfügbar ist; noch nicht auf einem tatsächlichen RX 9000 verifiziert",
    "pt-BR": "FSR 4 ML necessita de um RX 9000 suportado e condutor e muda para FSR 3.1 quando não estiver disponível; ainda não verificado num RX 9000 efectivo",
    "ru": "FSR 4 ML нуждается в поддерживаемом RX 9000 и драйвере и переключается на FSR 3.1, когда он недоступен; еще не проверен на фактическом RX 9000"
+  },
+  {
+   "zh": "FSR RCAS 锐化",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "FSR RCAS 銳化",
+   "en": "FSR RCAS sharpening",
+   "ja": "FSR RCAS シャープニング",
+   "ko": "FSR RCAS 샤프닝",
+   "es": "Nitidez RCAS de FSR",
+   "fr": "Netteté RCAS de FSR",
+   "de": "FSR-RCAS-Schärfung",
+   "pt-BR": "Nitidez RCAS do FSR",
+   "ru": "Резкость RCAS в FSR"
+  },
+  {
+   "zh": "FSR 反应遮罩",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "FSR 反應遮罩",
+   "en": "FSR reactive mask",
+   "ja": "FSR リアクティブマスク",
+   "ko": "FSR 리액티브 마스크",
+   "es": "Máscara reactiva de FSR",
+   "fr": "Masque réactif FSR",
+   "de": "FSR-Reactive-Maske",
+   "pt-BR": "Máscara reativa do FSR",
+   "ru": "Реактивная маска FSR"
+  },
+  {
+   "zh": "FSR 版本",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "FSR 版本",
+   "en": "FSR version",
+   "ja": "FSR バージョン",
+   "ko": "FSR 버전",
+   "es": "Versión de FSR",
+   "fr": "Version FSR",
+   "de": "FSR-Version",
+   "pt-BR": "Versão do FSR",
+   "ru": "Версия FSR"
   },
   {
    "zh": "FXAA：最快，整体略柔",
@@ -4278,6 +4434,19 @@
    "ru": "Qwen2.5 1.5B Q4 и среда ЦП · Загрузка %1 ГБ"
   },
   {
+   "zh": "RCAS 锐化强度",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "RCAS 銳化強度",
+   "en": "RCAS sharpening strength",
+   "ja": "RCAS シャープニングの強さ",
+   "ko": "RCAS 샤프닝 강도",
+   "es": "Intensidad de nitidez RCAS",
+   "fr": "Intensité de la netteté RCAS",
+   "de": "RCAS-Schärfungsstärke",
+   "pt-BR": "Intensidade da nitidez RCAS",
+   "ru": "Сила резкости RCAS"
+  },
+  {
    "zh": "RTX 30 VFG 为实验兼容，复用现有模型；支持 2X～8X，实际画质与速度需实卡验证",
    "src": "src/ui/bridge/FrameGeneration.cpp",
    "zh-TW": "RTX 30 VFG 為實驗相容，重用現有模型；支援 2X～8X，實際畫質與速度需實卡驗證",
@@ -4406,32 +4575,6 @@
    "de": "RX 7000 / 9000 · AMD NR (experimentell)",
    "pt-BR": "RX 7000 / 9000 · AMD NR (experimental)",
    "ru": "RX 7000 / 9000 · AMD NR (экспериментальный)"
-  },
-  {
-   "zh": "RX 7000 · RedDuke（实验）",
-   "src": "src/ui/bridge/Hardware.cpp",
-   "zh-TW": "RX 7000 · RedDuke（實驗）",
-   "en": "RX 7000 · RedDuke (experimental)",
-   "ja": "RX 7000 · RedDuke（実験）",
-   "ko": "RX 7000 · RedDuke(실험용)",
-   "es": "RX 7000 · RedDuke (experimental)",
-   "fr": "RX 7000 · RedDuke (expérimental)",
-   "de": "RX 7000 · RedDuke (experimentell)",
-   "pt-BR": "RX 7000 · RedDuke (experimental)",
-   "ru": "RX 7000 · RedDuke (экспериментально)"
-  },
-  {
-   "zh": "RX 9000 · lmxxf（实验）",
-   "src": "src/ui/bridge/Hardware.cpp",
-   "zh-TW": "RX 9000 · lmxxf（實驗）",
-   "en": "RX 9000 · lmxxf (experimental)",
-   "ja": "RX 9000 · lmxxf（実験）",
-   "ko": "RX 9000 · lmxxf(실험용)",
-   "es": "RX 9000 · lmxf (experimental)",
-   "fr": "RX 9000 · lmxxf (expérimental)",
-   "de": "RX 9000 · lmxxf (experimentell)",
-   "pt-BR": "RX 9000 · lmxxf (experimental)",
-   "ru": "RX 9000 · lmxxf (экспериментально)"
   },
   {
    "zh": "SDK 提交",
@@ -8347,6 +8490,19 @@
    "ru": "Формат пикселей"
   },
   {
+   "zh": "允许参考后一帧改善运动连续性，会增加约一帧延迟 · 默认关闭",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "允許參考後一幀改善運動連續性，會增加約一幀延遲 · 預設關閉",
+   "en": "Lets the interpolator look at the next frame for smoother motion; adds about one frame of latency · off by default",
+   "ja": "次のフレームも参照して動きの連続性を高めます。約 1 フレーム分の遅延が増えます · 既定はオフ",
+   "ko": "다음 프레임까지 참조해 움직임의 연속성을 높입니다. 약 1프레임의 지연이 늘어납니다 · 기본 꺼짐",
+   "es": "Permite consultar el fotograma siguiente para mejorar la continuidad del movimiento; añade alrededor de un fotograma de latencia · desactivado por defecto",
+   "fr": "Permet de consulter l'image suivante pour améliorer la continuité du mouvement ; ajoute environ une image de latence · désactivé par défaut",
+   "de": "Berücksichtigt das nächste Frame für flüssigere Bewegungen; kostet etwa ein Frame Latenz · standardmäßig aus",
+   "pt-BR": "Permite consultar o quadro seguinte para melhorar a continuidade do movimento; acrescenta cerca de um quadro de latência · desativado por padrão",
+   "ru": "Учитывает следующий кадр для плавности движения; добавляет около одного кадра задержки · по умолчанию выкл."
+  },
+  {
    "zh": "允许撕裂",
    "src": "qml/NodePage.qml",
    "zh-TW": "允許撕裂",
@@ -10753,6 +10909,32 @@
    "ru": "Native NR (более высокая стоимость исполнения)"
   },
   {
+   "zh": "原生精度",
+   "src": "src/ui/bridge/FrameGeneration.cpp",
+   "zh-TW": "原生精度",
+   "en": "Native precision",
+   "ja": "ネイティブ精度",
+   "ko": "네이티브 정밀도",
+   "es": "Precisión nativa",
+   "fr": "Précision native",
+   "de": "Native Präzision",
+   "pt-BR": "Precisão nativa",
+   "ru": "Нативная точность"
+  },
+  {
+   "zh": "原生精度画质更稳，性能优先更省 GPU · 默认自动",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "原生精度畫質更穩，效能優先更省 GPU · 預設自動",
+   "en": "Native precision keeps the picture steadier; performance first uses less GPU · auto by default",
+   "ja": "ネイティブ精度は画質が安定し、パフォーマンス優先は GPU 負荷を抑えます · 既定は自動",
+   "ko": "네이티브 정밀도는 화질이 더 안정적이고, 성능 우선은 GPU를 덜 씁니다 · 기본 자동",
+   "es": "La precisión nativa mantiene la imagen más estable; priorizar rendimiento usa menos GPU · automático por defecto",
+   "fr": "La précision native stabilise davantage l'image ; la priorité aux performances sollicite moins le GPU · automatique par défaut",
+   "de": "Native Präzision hält das Bild stabiler, Leistung bevorzugt spart GPU-Leistung · standardmäßig automatisch",
+   "pt-BR": "A precisão nativa deixa a imagem mais estável; priorizar desempenho usa menos GPU · automático por padrão",
+   "ru": "Нативная точность стабильнее по картинке, приоритет производительности меньше нагружает GPU · по умолчанию авто"
+  },
+  {
    "zh": "原生采集先确认有效信号；请在设备列表选择对应的 HDMI/SDI 输入，支持自动检测的卡建议选择自动。Driver 保留驱动当前输入。",
    "src": "src/ui/bridge/Capture.cpp",
    "zh-TW": "原生擷取會先確認有效訊號；請在裝置清單選擇對應的 HDMI/SDI 輸入，支援自動偵測的卡建議選擇自動。Driver 保留驅動程式目前輸入。",
@@ -12064,6 +12246,19 @@
    "de": "Konnte die Startvorgabe nicht speichern",
    "pt-BR": "Não foi possível salvar a predefinição padrão de inicialização",
    "ru": "Не удалось сохранить старт по умолчанию предустановленной"
+  },
+  {
+   "zh": "启用 FSR 内置对比度自适应锐化 · 默认关闭",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "啟用 FSR 內建對比度自適應銳化 · 預設關閉",
+   "en": "Turns on FSR's built-in contrast-adaptive sharpening · off by default",
+   "ja": "FSR 内蔵のコントラスト適応型シャープニングを有効にします · 既定はオフ",
+   "ko": "FSR에 내장된 대비 적응형 샤프닝을 켭니다 · 기본 꺼짐",
+   "es": "Activa la nitidez adaptativa al contraste integrada en FSR · desactivado por defecto",
+   "fr": "Active la netteté adaptative au contraste intégrée à FSR · désactivé par défaut",
+   "de": "Aktiviert die in FSR integrierte kontrastadaptive Schärfung · standardmäßig aus",
+   "pt-BR": "Ativa a nitidez adaptativa ao contraste integrada do FSR · desativado por padrão",
+   "ru": "Включает встроенную контрастно-адаптивную резкость FSR · по умолчанию выкл."
   },
   {
    "zh": "启用后会把系统字幕文本发送给所选服务。",
@@ -15980,7 +16175,7 @@
   },
   {
    "zh": "已关闭当前硬件或包不支持的效果，参数仍保留：",
-   "src": "src/ui/bridge/Preferences.cpp",
+   "src": "src/ui/QmlPlayerBridge.cpp",
    "zh-TW": "已關閉目前硬體或套件不支援的效果，參數仍保留：",
    "en": "Unavailable effects have been disabled; their parameters are preserved: ",
    "ja": "非対応の効果を無効にしました。設定値は保持されています：",
@@ -17695,6 +17890,45 @@
    "ru": "Двигатель не принимал режим работы AMD; предыдущая настройка сохранялась"
   },
   {
+   "zh": "引擎未接受 AMF FRC 质量档，原设置保留",
+   "src": "src/ui/bridge/FrameGeneration.cpp",
+   "zh-TW": "引擎未接受 AMF FRC 品質檔，原設定保留",
+   "en": "The engine did not accept the AMF FRC quality profile; the previous setting is kept",
+   "ja": "エンジンが AMF FRC 品質プロファイルを受け付けませんでした。元の設定を維持します",
+   "ko": "AMF FRC 품질 프로필을 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó el perfil de calidad AMF FRC; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté le profil de qualité AMF FRC ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat das AMF-FRC-Qualitätsprofil nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou o perfil de qualidade do AMF FRC; a configuração anterior é mantida",
+   "ru": "Двигатель не принял профиль качества AMF FRC; предыдущая настройка сохранена"
+  },
+  {
+   "zh": "引擎未接受 AMF 未来帧插值设置，原设置保留",
+   "src": "src/ui/bridge/FrameGeneration.cpp",
+   "zh-TW": "引擎未接受 AMF 未來幀插值設定，原設定保留",
+   "en": "The engine did not accept the AMF future frame interpolation setting; the previous setting is kept",
+   "ja": "エンジンが AMF 将来フレーム補間の設定を受け付けませんでした。元の設定を維持します",
+   "ko": "AMF 미래 프레임 보간 설정을 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó el ajuste de interpolación con fotograma futuro AMF; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté le réglage d'interpolation avec image future AMF ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat die AMF-Einstellung für Interpolation mit zukünftigem Frame nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou a configuração de interpolação com quadro futuro do AMF; a configuração anterior é mantida",
+   "ru": "Двигатель не принял настройку интерполяции с будущим кадром AMF; предыдущая настройка сохранена"
+  },
+  {
+   "zh": "引擎未接受 AMF 运动搜索模式，原设置保留",
+   "src": "src/ui/bridge/FrameGeneration.cpp",
+   "zh-TW": "引擎未接受 AMF 運動搜尋模式，原設定保留",
+   "en": "The engine did not accept the AMF motion search mode; the previous setting is kept",
+   "ja": "エンジンが AMF 動き探索モードを受け付けませんでした。元の設定を維持します",
+   "ko": "AMF 움직임 탐색 모드를 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó el modo de búsqueda de movimiento AMF; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté le mode de recherche de mouvement AMF ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat den AMF-Bewegungssuchmodus nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou o modo de busca de movimento do AMF; a configuração anterior é mantida",
+   "ru": "Двигатель не принял режим поиска движения AMF; предыдущая настройка сохранена"
+  },
+  {
    "zh": "引擎未接受 DLSS 性能模式，原设置保留",
    "src": "src/ui/bridge/FrameGeneration.cpp",
    "zh-TW": "引擎未接受 DLSS 效能模式，原設定保留",
@@ -17706,6 +17940,58 @@
    "de": "Der Motor hat den Leistungsmodus DLSS nicht akzeptiert; die vorherige Einstellung wird beibehalten",
    "pt-BR": "O motor não aceitou o modo de desempenho DLSS; a configuração anterior é mantida",
    "ru": "Двигатель не принял режим работы DLSS; предыдущая настройка сохранена"
+  },
+  {
+   "zh": "引擎未接受 FSR RCAS 锐化强度，原设置保留",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "引擎未接受 FSR RCAS 銳化強度，原設定保留",
+   "en": "The engine did not accept the FSR RCAS sharpening strength; the previous setting is kept",
+   "ja": "エンジンが FSR RCAS シャープニングの強さを受け付けませんでした。元の設定を維持します",
+   "ko": "FSR RCAS 샤프닝 강도를 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó la intensidad de nitidez RCAS de FSR; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté l'intensité de la netteté RCAS de FSR ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat die FSR-RCAS-Schärfungsstärke nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou a intensidade da nitidez RCAS do FSR; a configuração anterior é mantida",
+   "ru": "Двигатель не принял силу резкости RCAS в FSR; предыдущая настройка сохранена"
+  },
+  {
+   "zh": "引擎未接受 FSR RCAS 锐化，原设置保留",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "引擎未接受 FSR RCAS 銳化，原設定保留",
+   "en": "The engine did not accept FSR RCAS sharpening; the previous setting is kept",
+   "ja": "エンジンが FSR RCAS シャープニングを受け付けませんでした。元の設定を維持します",
+   "ko": "FSR RCAS 샤프닝을 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó la nitidez RCAS de FSR; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté la netteté RCAS de FSR ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat die FSR-RCAS-Schärfung nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou a nitidez RCAS do FSR; a configuração anterior é mantida",
+   "ru": "Двигатель не принял резкость RCAS в FSR; предыдущая настройка сохранена"
+  },
+  {
+   "zh": "引擎未接受 FSR 反应遮罩，原设置保留",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "引擎未接受 FSR 反應遮罩，原設定保留",
+   "en": "The engine did not accept the FSR reactive mask; the previous setting is kept",
+   "ja": "エンジンが FSR リアクティブマスクを受け付けませんでした。元の設定を維持します",
+   "ko": "FSR 리액티브 마스크를 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó la máscara reactiva de FSR; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté le masque réactif FSR ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat die FSR-Reactive-Maske nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou a máscara reativa do FSR; a configuração anterior é mantida",
+   "ru": "Двигатель не принял реактивную маску FSR; предыдущая настройка сохранена"
+  },
+  {
+   "zh": "引擎未接受 FSR 版本模式，原设置保留",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "引擎未接受 FSR 版本模式，原設定保留",
+   "en": "The engine did not accept the FSR version mode; the previous setting is kept",
+   "ja": "エンジンが FSR バージョンモードを受け付けませんでした。元の設定を維持します",
+   "ko": "FSR 버전 모드를 적용하지 못해 이전 설정을 유지합니다.",
+   "es": "El motor no aceptó el modo de versión de FSR; el ajuste anterior se mantiene",
+   "fr": "Le moteur n'a pas accepté le mode de version FSR ; le réglage précédent est maintenu.",
+   "de": "Der Motor hat den FSR-Versionsmodus nicht akzeptiert; die vorherige Einstellung wird beibehalten",
+   "pt-BR": "O motor não aceitou o modo de versão do FSR; a configuração anterior é mantida",
+   "ru": "Двигатель не принял режим версии FSR; предыдущая настройка сохранена"
   },
   {
    "zh": "引擎未接受 HUD 自动锁定，原设置保留",
@@ -18436,6 +18722,19 @@
    "ru": "Это устройство не может запускать выбранное NR. Выберите NR время выполнения, поддерживаемое этим GPU."
   },
   {
+   "zh": "当前超分算法暂不支持双阶段超分",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "目前超分演算法暫不支援雙階段超分",
+   "en": "The current SR algorithm does not support two-stage SR yet",
+   "ja": "現在の超解像アルゴリズムは 2 段階超解像に未対応です",
+   "ko": "현재 초해상도 알고리즘은 2단계 초해상도를 지원하지 않습니다.",
+   "es": "El algoritmo SR actual todavía no admite SR de dos etapas",
+   "fr": "L'algorithme SR actuel ne prend pas encore en charge la SR en deux étapes",
+   "de": "Der aktuelle SR-Algorithmus unterstützt noch kein zweistufiges SR",
+   "pt-BR": "O algoritmo SR atual ainda não suporta SR em dois estágios",
+   "ru": "Текущий алгоритм SR пока не поддерживает двухэтапный SR"
+  },
+  {
    "zh": "当前软件包未包含去隔行组件",
    "src": "qml/SettingsPage.qml",
    "zh-TW": "目前軟體包未包含去隔行元件",
@@ -18969,6 +19268,19 @@
    "ru": "Производительность и время обработки"
   },
   {
+   "zh": "性能优先",
+   "src": "src/ui/bridge/FrameGeneration.cpp",
+   "zh-TW": "效能優先",
+   "en": "Performance first",
+   "ja": "パフォーマンス優先",
+   "ko": "성능 우선",
+   "es": "Priorizar rendimiento",
+   "fr": "Priorité aux performances",
+   "de": "Leistung bevorzugt",
+   "pt-BR": "Priorizar desempenho",
+   "ru": "Приоритет производительности"
+  },
+  {
    "zh": "总体强度",
    "src": "qml/ProDisplayPanel.qml",
    "zh-TW": "總體強度",
@@ -19268,6 +19580,32 @@
    "ru": "Выбранный формат {:.3f} FPS, но карта захвата возвращается {:.3f} FPS Выберите формат, который поддерживает устройство."
   },
   {
+   "zh": "所选空间超分算法只做放大：片源已达到目标尺寸，所以没有运行。",
+   "src": "src/ui/bridge/Status.cpp",
+   "zh-TW": "所選空間超分演算法只做放大：片源已達到目標尺寸，所以沒有執行。",
+   "en": "The selected spatial SR algorithm only enlarges: the source already reaches the target size, so it did not run.",
+   "ja": "選択した空間的超解像アルゴリズムは拡大専用です。ソースがすでに目標サイズのため実行されませんでした。",
+   "ko": "선택한 공간 초해상도 알고리즘은 확대 전용입니다. 원본이 이미 목표 크기에 도달해 실행하지 않았습니다.",
+   "es": "El algoritmo SR espacial seleccionado solo amplía: la fuente ya alcanza el tamaño del objetivo, así que no se ejecutó.",
+   "fr": "L'algorithme SR spatial sélectionné ne fait qu'agrandir : la source atteint déjà la taille cible, il n'a donc pas été exécuté.",
+   "de": "Der gewählte räumliche SR-Algorithmus vergrößert nur: Die Quelle erreicht bereits die Zielgröße, daher wurde er nicht ausgeführt.",
+   "pt-BR": "O algoritmo SR espacial selecionado apenas amplia: a origem já atinge o tamanho do alvo, então ele não foi executado.",
+   "ru": "Выбранный пространственный алгоритм SR только увеличивает: источник уже достигает целевого размера, поэтому он не запускался."
+  },
+  {
+   "zh": "所选空间超分算法暂不支持双阶段超分，已按单阶段运行。",
+   "src": "src/ui/bridge/Status.cpp",
+   "zh-TW": "所選空間超分演算法暫不支援雙階段超分，已按單階段執行。",
+   "en": "The selected spatial SR algorithm does not support two-stage SR yet, so it ran as a single stage.",
+   "ja": "選択した空間的超解像アルゴリズムは 2 段階超解像に未対応のため、1 段階で実行しました。",
+   "ko": "선택한 공간 초해상도 알고리즘은 2단계 초해상도를 지원하지 않아 1단계로 실행했습니다.",
+   "es": "El algoritmo SR espacial seleccionado todavía no admite SR de dos etapas, así que se ejecutó como una sola etapa.",
+   "fr": "L'algorithme SR spatial sélectionné ne prend pas encore en charge la SR en deux étapes ; il a donc fonctionné en une seule étape.",
+   "de": "Der gewählte räumliche SR-Algorithmus unterstützt noch kein zweistufiges SR und lief daher als eine Stufe.",
+   "pt-BR": "O algoritmo SR espacial selecionado ainda não suporta SR em dois estágios, então foi executado como um único estágio.",
+   "ru": "Выбранный пространственный алгоритм SR пока не поддерживает двухэтапный SR, поэтому он выполнился как один этап."
+  },
+  {
    "zh": "所选补帧后端的倍率已调整为 %1X",
    "src": "src/ui/bridge/FrameGeneration.cpp",
    "zh-TW": "所選補幀後端的倍率已調整為 %1X",
@@ -19292,6 +19630,19 @@
    "de": "Das ausgewählte Gerät ist nicht verfügbar; fiel auf den Systemstandard zurück: ",
    "pt-BR": "O dispositivo selecionado está indisponível; voltou ao padrão do sistema: ",
    "ru": "Выбранное устройство недоступно; вернулось к системе по умолчанию: "
+  },
+  {
+   "zh": "所选超分后端初始化失败（缺少模型/运行库或当前画面格式不支持），未静默降级，请查看任务诊断日志",
+   "src": "src/engine/VideoExportJob.cpp",
+   "zh-TW": "所選超解析後端初始化失敗（缺少模型／執行階段或目前畫面格式不支援），未靜默降級，請查看任務診斷日誌",
+   "en": "Selected super-resolution backend failed to initialize (missing model/runtime or unsupported frame format); not silently downgraded—see the task diagnostic log",
+   "ja": "選択した超解像バックエンドの初期化に失敗しました（モデル/ランタイム不足、または現在の映像形式に非対応）。自動ダウングレードは行っていません。タスク診断ログを確認してください",
+   "ko": "선택한 초해상도 백엔드 초기화에 실패했습니다(모델/런타임 누락 또는 현재 화면 형식 미지원). 임의로 품질을 낮추지 않았으니 작업 진단 로그를 확인하세요",
+   "es": "Error al inicializar el motor de superresolución seleccionado (falta el modelo o el entorno de ejecución, o el formato de imagen no es compatible); no se degradó en silencio, consulte el registro de diagnóstico de la tarea",
+   "fr": "Échec de l'initialisation du moteur de super-résolution sélectionné (modèle/runtime manquant ou format d'image non pris en charge) ; aucune dégradation silencieuse n'a été appliquée, consultez le journal de diagnostic de la tâche",
+   "de": "Initialisierung des ausgewählten Superauflösungs-Backends fehlgeschlagen (Modell/Laufzeit fehlt oder Bildformat nicht unterstützt); kein stilles Herabstufen – siehe Auftrags-Diagnoseprotokoll",
+   "pt-BR": "Falha ao inicializar o mecanismo de super-resolução selecionado (modelo/runtime ausente ou formato de quadro não suportado); sem rebaixamento silencioso, consulte o log de diagnóstico da tarefa",
+   "ru": "Не удалось инициализировать выбранный движок суперразрешения (отсутствует модель/среда выполнения или формат кадра не поддерживается); тихое снижение качества не выполнялось, см. журнал диагностики задачи"
   },
   {
    "zh": "所选轨道 {} 已不存在或类型不匹配",
@@ -20397,6 +20748,19 @@
    "de": "API-Modellname",
    "pt-BR": "Nome do modelo da API",
    "ru": "Имя модели API"
+  },
+  {
+   "zh": "控制 AMF 帧速率转换器质量档位 · 默认自动",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "控制 AMF 幀速率轉換器品質檔位 · 預設自動",
+   "en": "Controls the AMF frame rate converter quality profile · auto by default",
+   "ja": "AMF フレームレートコンバーターの品質プロファイルを設定します · 既定は自動",
+   "ko": "AMF 프레임 레이트 변환기의 품질 프로필을 설정합니다 · 기본 자동",
+   "es": "Controla el perfil de calidad del convertidor de tasa de fotogramas AMF · automático por defecto",
+   "fr": "Contrôle le profil de qualité du convertisseur de fréquence d'images AMF · automatique par défaut",
+   "de": "Legt das Qualitätsprofil des AMF-Framerate-Konverters fest · standardmäßig automatisch",
+   "pt-BR": "Controla o perfil de qualidade do conversor de taxa de quadros do AMF · automático por padrão",
+   "ru": "Задаёт профиль качества AMF-конвертера частоты кадров · по умолчанию авто"
   },
   {
    "zh": "描边",
@@ -24560,6 +24924,32 @@
    "ru": "Локальное прослушивание"
   },
   {
+   "zh": "本次导出使用 AMD AMF Video SR",
+   "src": "src/engine/VideoExportJob.cpp",
+   "zh-TW": "本次匯出使用 AMD AMF Video SR",
+   "en": "This export uses AMD AMF Video SR",
+   "ja": "今回の書き出しは AMD AMF Video SR を使用します",
+   "ko": "이 내보내기는 AMD AMF Video SR을 사용합니다.",
+   "es": "Esta exportación utiliza AMD AMF Video SR",
+   "fr": "Cette exportation utilise AMD AMF Video SR",
+   "de": "Dieser Export verwendet AMD AMF Video SR",
+   "pt-BR": "Esta exportação utiliza AMD AMF Video SR",
+   "ru": "Этот экспорт использует AMD AMF Video SR"
+  },
+  {
+   "zh": "本次导出使用 AMD AMF 画质增强",
+   "src": "src/engine/VideoExportJob.cpp",
+   "zh-TW": "本次匯出使用 AMD AMF 畫質增強",
+   "en": "This export uses AMD AMF video quality enhancement",
+   "ja": "今回の書き出しは AMD AMF 画質強調を使用します",
+   "ko": "이 내보내기는 AMD AMF 화질 향상을 사용합니다.",
+   "es": "Esta exportación utiliza mejora de calidad de video AMD AMF",
+   "fr": "Cette exportation utilise l'amélioration de qualité vidéo AMD AMF",
+   "de": "Dieser Export verwendet AMD AMF-Bildqualitätsverbesserung",
+   "pt-BR": "Esta exportação utiliza melhoria de qualidade de vídeo AMD AMF",
+   "ru": "Этот экспорт использует улучшение качества видео AMD AMF"
+  },
+  {
    "zh": "本次导出使用 AMD FSR 超分",
    "src": "src/engine/VideoExportJob.cpp",
    "zh-TW": "本次匯出使用 AMD FSR 超解析",
@@ -24571,6 +24961,32 @@
    "de": "Diese Ausfuhr verwendet AMD FSR Superauflösung",
    "pt-BR": "Esta exportação utiliza AMD FSR super resolução",
    "ru": "Этот экспорт использует AMD FSR Супер разрешение"
+  },
+  {
+   "zh": "本次导出使用 ArtCNN 2× 超分",
+   "src": "src/engine/VideoExportJob.cpp",
+   "zh-TW": "本次匯出使用 ArtCNN 2× 超解析",
+   "en": "This export uses ArtCNN 2× super resolution",
+   "ja": "今回の書き出しは ArtCNN 2× 超解像を使用します",
+   "ko": "이 내보내기는 ArtCNN 2× 초해상도를 사용합니다.",
+   "es": "Esta exportación utiliza superresolución ArtCNN 2×",
+   "fr": "Cette exportation utilise la super-résolution ArtCNN 2×",
+   "de": "Dieser Export verwendet ArtCNN-2×-Superauflösung",
+   "pt-BR": "Esta exportação utiliza super-resolução ArtCNN 2×",
+   "ru": "Этот экспорт использует суперразрешение ArtCNN 2×"
+  },
+  {
+   "zh": "本次导出使用 DirectML 空间超分",
+   "src": "src/engine/VideoExportJob.cpp",
+   "zh-TW": "本次匯出使用 DirectML 空間超解析",
+   "en": "This export uses DirectML spatial super resolution",
+   "ja": "今回の書き出しは DirectML 空間超解像を使用します",
+   "ko": "이 내보내기는 DirectML 공간 초해상도를 사용합니다.",
+   "es": "Esta exportación utiliza superresolución espacial DirectML",
+   "fr": "Cette exportation utilise la super-résolution spatiale DirectML",
+   "de": "Dieser Export verwendet räumliche DirectML-Superauflösung",
+   "pt-BR": "Esta exportação utiliza super-resolução espacial DirectML",
+   "ru": "Этот экспорт использует пространственное суперразрешение DirectML"
   },
   {
    "zh": "本次播放检测到全屏显存持续增长，请使用窗口播放；重新打开片源后可再次测试全屏。",
@@ -29929,6 +30345,71 @@
    "ru": "Кодер вернул неизвестное число кадра"
   },
   {
+   "zh": "缺少 ArtCNN C4F16 权重文件",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "缺少 ArtCNN C4F16 權重檔案",
+   "en": "The ArtCNN C4F16 weight file is missing",
+   "ja": "ArtCNN C4F16 の重みファイルがありません",
+   "ko": "ArtCNN C4F16 가중치 파일이 없습니다.",
+   "es": "Falta el archivo de pesos ArtCNN C4F16",
+   "fr": "Le fichier de poids ArtCNN C4F16 est manquant",
+   "de": "Die ArtCNN C4F16-Gewichtsdatei fehlt",
+   "pt-BR": "Falta o arquivo de pesos do ArtCNN C4F16",
+   "ru": "Отсутствует файл весов ArtCNN C4F16"
+  },
+  {
+   "zh": "缺少 ArtCNN C4F32 权重文件",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "缺少 ArtCNN C4F32 權重檔案",
+   "en": "The ArtCNN C4F32 weight file is missing",
+   "ja": "ArtCNN C4F32 の重みファイルがありません",
+   "ko": "ArtCNN C4F32 가중치 파일이 없습니다.",
+   "es": "Falta el archivo de pesos ArtCNN C4F32",
+   "fr": "Le fichier de poids ArtCNN C4F32 est manquant",
+   "de": "Die ArtCNN C4F32-Gewichtsdatei fehlt",
+   "pt-BR": "Falta o arquivo de pesos do ArtCNN C4F32",
+   "ru": "Отсутствует файл весов ArtCNN C4F32"
+  },
+  {
+   "zh": "缺少 ONNX Runtime / DirectML 运行组件",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "缺少 ONNX Runtime / DirectML 執行元件",
+   "en": "The ONNX Runtime / DirectML runtime components are missing",
+   "ja": "ONNX Runtime / DirectML のランタイムがありません",
+   "ko": "ONNX Runtime / DirectML 런타임 구성 요소가 없습니다.",
+   "es": "Faltan los componentes de ejecución de ONNX Runtime / DirectML",
+   "fr": "Les composants d'exécution ONNX Runtime / DirectML sont manquants",
+   "de": "Die ONNX Runtime / DirectML-Laufzeitkomponenten fehlen",
+   "pt-BR": "Faltam os componentes de execução do ONNX Runtime / DirectML",
+   "ru": "Отсутствуют компоненты среды выполнения ONNX Runtime / DirectML"
+  },
+  {
+   "zh": "缺少 RealPLKSR ONNX 模型文件",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "缺少 RealPLKSR ONNX 模型檔案",
+   "en": "The RealPLKSR ONNX model file is missing",
+   "ja": "RealPLKSR ONNX モデルファイルがありません",
+   "ko": "RealPLKSR ONNX 모델 파일이 없습니다.",
+   "es": "Falta el archivo de modelo ONNX de RealPLKSR",
+   "fr": "Le fichier de modèle ONNX RealPLKSR est manquant",
+   "de": "Die RealPLKSR-ONNX-Modelldatei fehlt",
+   "pt-BR": "Falta o arquivo de modelo ONNX do RealPLKSR",
+   "ru": "Отсутствует файл модели ONNX RealPLKSR"
+  },
+  {
+   "zh": "缺少 SPAN ONNX 模型文件",
+   "src": "src/ui/bridge/Hardware.cpp",
+   "zh-TW": "缺少 SPAN ONNX 模型檔案",
+   "en": "The SPAN ONNX model file is missing",
+   "ja": "SPAN ONNX モデルファイルがありません",
+   "ko": "SPAN ONNX 모델 파일이 없습니다.",
+   "es": "Falta el archivo de modelo ONNX de SPAN",
+   "fr": "Le fichier de modèle ONNX SPAN est manquant",
+   "de": "Die SPAN-ONNX-Modelldatei fehlt",
+   "pt-BR": "Falta o arquivo de modelo ONNX do SPAN",
+   "ru": "Отсутствует файл модели ONNX SPAN"
+  },
+  {
    "zh": "缺少此字幕格式的解码器",
    "src": "src/engine/Subtitles.cpp",
    "zh-TW": "缺少此字幕格式的解碼器",
@@ -30696,6 +31177,19 @@
    "ru": "Авто NR экземпляр пул недоступен; сохранение 1080p NR"
   },
   {
+   "zh": "自动优先选用 FSR 4 并按硬件回退 FSR 3.x；强制选档若不支持会提示回退",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "自動優先選用 FSR 4 並依硬體回退 FSR 3.x；強制選檔若不支援會提示回退",
+   "en": "Auto prefers FSR 4 and falls back to FSR 3.x according to the hardware; a forced choice that is unsupported reports the fallback",
+   "ja": "自動は FSR 4 を優先し、ハードウェアに応じて FSR 3.x にフォールバックします。強制した選択が非対応の場合はフォールバックを通知します",
+   "ko": "자동은 FSR 4를 우선 사용하고 하드웨어에 따라 FSR 3.x로 대체합니다. 강제로 고른 항목이 지원되지 않으면 대체 사실을 알려 줍니다.",
+   "es": "Automático prefiere FSR 4 y recurre a FSR 3.x según el hardware; si se fuerza una opción no compatible, se avisa del retroceso",
+   "fr": "Automatique privilégie FSR 4 et revient à FSR 3.x selon le matériel ; forcer une option non prise en charge signale ce retour",
+   "de": "Automatisch bevorzugt FSR 4 und fällt je nach Hardware auf FSR 3.x zurück; eine erzwungene, nicht unterstützte Stufe meldet den Rückfall",
+   "pt-BR": "Automático prefere o FSR 4 e recorre ao FSR 3.x conforme o hardware; forçar uma opção sem suporte avisa sobre o retrocesso",
+   "ru": "Авто предпочитает FSR 4 и откатывается на FSR 3.x по возможностям железа; при принудительном выборе без поддержки сообщается об откате"
+  },
+  {
    "zh": "自动估算",
    "src": "qml/AudioSettingsDialog.qml",
    "zh-TW": "自動估算",
@@ -30878,6 +31372,19 @@
    "ru": "Автоматическая синхронизация экрана"
   },
   {
+   "zh": "自动标记重影、光流切变和静态 HUD 像素，减少 2D 画面拖影 · 默认开启",
+   "src": "qml/NodePage.qml",
+   "zh-TW": "自動標記鬼影、光流切變與靜態 HUD 像素，減少 2D 畫面殘影 · 預設開啟",
+   "en": "Marks ghosting, optical-flow shear and static HUD pixels automatically, so 2D content smears less · on by default",
+   "ja": "ゴースト、オプティカルフローのずれ、静止した HUD の画素を自動でマークし、2D 映像の残像を抑えます · 既定はオン",
+   "ko": "고스팅, 광학 흐름의 어긋남, 정지된 HUD 픽셀을 자동으로 표시해 2D 화면의 잔상을 줄입니다 · 기본 켜짐",
+   "es": "Marca automáticamente imágenes fantasma, cizalladura del flujo óptico y píxeles estáticos del HUD, para que el contenido 2D deje menos estelas · activado por defecto",
+   "fr": "Marque automatiquement les images fantômes, le cisaillement du flux optique et les pixels statiques du HUD, pour moins de traînées en 2D · activé par défaut",
+   "de": "Markiert Geisterbildung, Scherung des optischen Flusses und statische HUD-Pixel automatisch, sodass 2D-Inhalte weniger Schlieren ziehen · standardmäßig an",
+   "pt-BR": "Marca automaticamente fantasmas, cisalhamento do fluxo óptico e pixels estáticos do HUD, reduzindo rastros em conteúdo 2D · ativado por padrão",
+   "ru": "Автоматически размечает призраки, сдвиг оптического потока и статичные пиксели HUD, поэтому 2D-контент меньше шлейфит · по умолчанию вкл."
+  },
+  {
    "zh": "自动档在预览中按增强耗时调整 100%–40%；预建实例约增加 1.7GB 显存及半秒启动时间。视频导出固定按最高 1440p 处理，输出尺寸不变。",
    "src": "qml/NrLayerEditor.qml",
    "zh-TW": "自動檔在預覽中依增強耗時調整 100%–40%；預建執行個體約增加 1.7GB 顯示記憶體及半秒啟動時間。影片匯出固定依最高 1440p 處理，輸出尺寸不變。",
@@ -30993,6 +31500,19 @@
    "de": "Automatisch ausblenden",
    "pt-BR": "Ocultar automaticamente",
    "ru": "Автоскрытие"
+  },
+  {
+   "zh": "自动（优先 FSR 4）",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "自動（優先 FSR 4）",
+   "en": "Auto (FSR 4 preferred)",
+   "ja": "自動（FSR 4 優先）",
+   "ko": "자동(FSR 4 우선)",
+   "es": "Automático (FSR 4 preferido)",
+   "fr": "Automatique (FSR 4 en priorité)",
+   "de": "Automatisch (FSR 4 bevorzugt)",
+   "pt-BR": "Automático (FSR 4 preferido)",
+   "ru": "Авто (приоритет FSR 4)"
   },
   {
    "zh": "自动（优先 PCM，必要时位流解码）",
@@ -33411,6 +33931,19 @@
    "de": "Dieser Knotentyp hat sein Limit erreicht (einschließlich deaktivierter und nicht verbundener Knoten)",
    "pt-BR": "Este tipo de nó atingiu o seu limite (incluindo nós desactivados e não ligados)",
    "ru": "Этот тип узла достиг своего предела (включая отключенные и неподключенные узлы)."
+  },
+  {
+   "zh": "该超分算法暂不支持双阶段超分",
+   "src": "src/ui/bridge/Enhancement.cpp",
+   "zh-TW": "該超分演算法暫不支援雙階段超分",
+   "en": "This SR algorithm does not support two-stage SR yet",
+   "ja": "この超解像アルゴリズムは 2 段階超解像に未対応です",
+   "ko": "이 초해상도 알고리즘은 2단계 초해상도를 지원하지 않습니다.",
+   "es": "Este algoritmo SR todavía no admite SR de dos etapas",
+   "fr": "Cet algorithme SR ne prend pas encore en charge la SR en deux étapes",
+   "de": "Dieser SR-Algorithmus unterstützt noch kein zweistufiges SR",
+   "pt-BR": "Este algoritmo SR ainda não suporta SR em dois estágios",
+   "ru": "Этот алгоритм SR пока не поддерживает двухэтапный SR"
   },
   {
    "zh": "语音识别",
@@ -41198,19 +41731,6 @@
    "de": "; aktuell: ",
    "pt-BR": "; atual: ",
    "ru": "; сейчас: "
-  },
-  {
-   "zh": "；本次导出使用 AMD FSR 超分",
-   "src": "src/engine/VideoExportJob.cpp",
-   "zh-TW": "；本次匯出使用 AMD FSR 超解析",
-   "en": "; this export uses AMD FSR super resolution",
-   "ja": "；今回の書き出しは AMD FSR 超解像を使用します",
-   "ko": "; 이 내보내기는 AMD FSR 초해상도를 사용합니다.",
-   "es": "; este uso de la exportación AMD FSR super resolución",
-   "fr": "; cette utilisation à l'exportation AMD FSR superrésolution",
-   "de": "; dieser Export verwendet AMD FSR Superauflösung",
-   "pt-BR": "; esta exportação utiliza AMD FSR super resolução",
-   "ru": "Этот экспорт использует AMD FSR Супер разрешение"
   },
   {
    "zh": "；详细原因见日志",

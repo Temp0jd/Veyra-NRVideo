@@ -106,7 +106,7 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
         // One description for the whole job: the stage rules (which SR runs,
         // whether NR/FG are available) come from the same place the preview uses.
         StageRequest stages;stages.nr=options.nr;stages.sr=options.sr;stages.fg=options.fg;stages.fgMultiplier=options.fgMultiplier;
-        stages.width=info.width;stages.height=info.height;stages.exportJob=true;stages.nvidiaAdapter=nvidiaAdapter;stages.amdNr=amdNrExport;
+        stages.width=info.width;stages.height=info.height;stages.exportJob=true;stages.nvidiaAdapter=nvidiaAdapter;stages.amdAdapter=amdAdapter;stages.amdNr=amdNrExport;
         const auto plan=describeStages(stages,options.snapshot(),gd);
         // Export keeps the standard DLSS-G model: quality first, no latency to save.
         gd.dlssgLite=false;
@@ -130,19 +130,44 @@ bool exportVideo(const std::wstring& input,const std::wstring& output,PlayerOpti
                 step.processing.width,step.processing.height,step.output.width,step.output.height));
         }
         if(options.sr&&!srAvailable)fgNote+=fgNote.empty()?L"当前显卡不能使用所选超分，本次导出关闭超分":L"；当前显卡不能使用所选超分，本次导出关闭超分";
-        if(!nvidiaFeatures&&srAvailable)fgNote+=fgNote.empty()?L"本次导出使用 AMD FSR 超分":L"；本次导出使用 AMD FSR 超分";
+        if(!nvidiaFeatures&&srAvailable){
+            const wchar_t* srExportLabel=
+                artcnnVideoSr(gd.videoSrQuality)?L"本次导出使用 ArtCNN 2× 超分":
+                amfHqVideoSr(gd.videoSrQuality)?L"本次导出使用 AMD AMF Video SR":
+                amfVqVideoSr(gd.videoSrQuality)?L"本次导出使用 AMD AMF 画质增强":
+                dmlVideoSr(gd.videoSrQuality)?L"本次导出使用 DirectML 空间超分":
+                L"本次导出使用 AMD FSR 超分";
+            fgNote+=fgNote.empty()?srExportLabel:(std::wstring(L"；")+srExportLabel);
+        }
         gd.runtimeAbsPath=runtime::localRuntimeDirectory().wstring();
         // Keep the requested multiplier. Changing it after initialization fails
         // would produce a successful-looking file with different settings.
         bool graphReady=false,fgFailure=false;
+        auto acceptInitializedGraph=[&]()->bool{
+            if(!graph.initialize(gd)||!graph.createViews())return false;
+            // Non-NGX / spatial SR initializers leave the backend unopened on a
+            // missing runtime/model or unsupported working space (HDR); an export
+            // must never write a file silently downgraded to plain scaling.
+            const bool srMissing=(graph.fsrSrRequested()&&!graph.fsrSrEnabled())||
+                (graph.artcnnSrRequested()&&!graph.artcnnSrEnabled())||
+                (graph.amfHqSrRequested()&&!graph.amfHqSrEnabled())||
+                (graph.amfVqSrRequested()&&!graph.amfVqSrEnabled())||
+                (graph.ortDmlSrRequested()&&!graph.ortDmlSrEnabled());
+            if(srMissing){
+                failureReason=L"所选超分后端初始化失败（缺少模型/运行库或当前画面格式不支持），未静默降级，请查看任务诊断日志";
+                return false;
+            }
+            return true;
+        };
         auto startGraph=[&](bool fg,uint32_t multiplier){
             gd.enableFg=fg;gd.fgMultiplier=fg?multiplier:1;
-            if(graph.initialize(gd)&&graph.createViews()){graphReady=true;return;}
+            if(acceptInitializedGraph()){graphReady=true;return;}
+            if(!failureReason.empty()){graph.shutdown();return;}
             if(graph.failedBackend()==FailedBackend::VideoHdr||(gd.convertVideoHdr()&&!gd.enableNr&&!gd.enableSr&&!gd.enableFg&&graph.failedBackend()==FailedBackend::NgxCore)){
                 graph.shutdown();
                 gd.videoHdr.enabled=false;gd.hdrOutput=gd.hdrInput;
                 fgNote+=L"；RTX Video HDR 初始化失败，本次保留 SDR（错误码见日志）";
-                if(graph.initialize(gd)&&graph.createViews()){graphReady=true;return;}
+                if(acceptInitializedGraph()){graphReady=true;return;}
             }
             fgFailure=graph.failedBackend()==FailedBackend::Fg;
             graph.shutdown();

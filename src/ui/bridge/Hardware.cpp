@@ -1,10 +1,14 @@
 // QML bridge: Hardware responsibilities.
 #include "../QmlPlayerBridge_p.h"
 #include "veyra/pipeline/Rdna3NrBackend.h"
+#include "veyra/pipeline/AmdNrProbe.h"
 #include "veyra/pipeline/AmdNrProvider.h"
+#include "veyra/ngx/DlssNrCoreHost.h"
 #include "veyra/pipeline/VfxSrBackend.h"
 #include "veyra/ngx/AnrProvider.h"
 #include "veyra/gfx/AmfFrcBackend.h"
+#include "veyra/gfx/AmfHqScalerBackend.h"
+#include "veyra/gfx/AmfVqEnhancerBackend.h"
 
 namespace veyra::ui {
 
@@ -70,6 +74,48 @@ ui::EffectGpu effectGpu() {
     return result;
 }
 
+namespace {
+constexpr DWORD kProbePathChars = 32768;
+// The directory holding the running executable, the last place a model or a
+// runtime component may live (next to Veyra.exe, not the working directory).
+std::filesystem::path executableDirectory() {
+    wchar_t exe[kProbePathChars]{};
+    const DWORD length = GetModuleFileNameW(nullptr, exe, kProbePathChars);
+    return length && length < kProbePathChars ? std::filesystem::path(exe).parent_path() : std::filesystem::current_path();
+}
+// Spatial SR weights, in the order FaceTracker locates its model: the packaged
+// runtime directory, the local override, then beside the executable.
+bool spatialSrModelExists(const wchar_t* fileName) {
+    const auto root = runtime::applicationRoot();
+    const std::filesystem::path folders[] = {root / "runtime" / "models", root / "runtime_local" / "models", executableDirectory() / "models"};
+    std::error_code ec;
+    for (const auto& folder : folders)
+        if (std::filesystem::is_regular_file(folder / fileName, ec)) return true;
+    return false;
+}
+// ONNX Runtime + DirectML for the DirectML SR backends. VEYRA_ONNXRUNTIME_DIR
+// wins only as an absolute path: a relative override would resolve against the
+// working directory and break the restricted absolute-only loading rule.
+bool ortDmlRuntimeExists() {
+    wchar_t overrideDir[kProbePathChars]{};
+    const DWORD length = GetEnvironmentVariableW(L"VEYRA_ONNXRUNTIME_DIR", overrideDir, kProbePathChars);
+    const std::filesystem::path overridePath(overrideDir);
+    if (length && length < kProbePathChars && overridePath.is_absolute()) {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(overridePath / L"onnxruntime.dll", ec)) return true;
+    }
+    const auto root = runtime::applicationRoot();
+    const std::filesystem::path candidates[] = {
+        root / "runtime" / "models" / "onnxruntime" / "onnxruntime.dll",
+        root / "runtime_local" / "models" / "onnxruntime" / "onnxruntime.dll",
+        executableDirectory() / "models" / "onnxruntime" / "onnxruntime.dll"};
+    std::error_code ec;
+    for (const auto& candidate : candidates)
+        if (std::filesystem::is_regular_file(candidate, ec)) return true;
+    return false;
+}
+} // namespace
+
 static QVariantMap scanEffectCapabilities() {
     using H = ui::HardwareEffect;
     const auto gpu = effectGpu();
@@ -89,12 +135,23 @@ static QVariantMap scanEffectCapabilities() {
         {"reason",gpu.deviceId!=0x2f04?QObject::tr("自动 NR 当前仅验证 RTX 5070"):!out.value("nr0").toMap().value("available").toBool()?QObject::tr("当前包缺少此功能的运行组件"):QString{}}};
     add("nr3", H::NvidiaNr50, exists(nr / "nr-original/nvngx_dlssnr.dll"), QObject::tr("需要 NVIDIA RTX 50 / Blackwell"));
     const auto rdna3Directory=(nr/"../amd-nr-rdna3").lexically_normal();
-    const bool amdNrFiles=gpu.rx7000?pipeline::Rdna3NrBackend::runtimeAvailable(rdna3Directory):exists(nr / "../amd-nr/LmxxfNrRuntime.dll");
+    const auto amdNrDirectory=(nr/"../amd-nr").lexically_normal();
+    // RX 7000 keeps its ZLUDA worker, but a Mochi/dlssnr_core package still serves RDNA3, and
+    // dlssnr_core only counts when this build compiled the NGX host in.
+    const auto amdNrLine=pipeline::amdNrFirstPresent([&](const wchar_t* module){
+        if (!exists(amdNrDirectory / module)) return false;
+        if (std::wstring(module) == ngx::DlssNrCoreHost::moduleName() && !ngx::DlssNrCoreHost::compiledIn()) return false;
+        return true;
+    });
+    const bool rdna3Ready=gpu.rx7000&&pipeline::Rdna3NrBackend::runtimeAvailable(rdna3Directory);
+    const bool rdna3Usable=rdna3Ready&&pipeline::Rdna3NrBackend::hipRuntimeAvailable();
+    const bool amdNrFiles=rdna3Ready||amdNrLine!=pipeline::AmdNrLine::None;
     add("nr4", H::AmdNr, amdNrFiles, QObject::tr("需要 AMD RX 7000 / 9000"));
     if(gpu.rx7000&&!amdNrFiles){auto cap=out.value("nr4").toMap();cap["reason"]=QObject::tr("当前包缺少 RX 7000 NR 运行组件");out["nr4"]=cap;}
     wchar_t systemDir[MAX_PATH]{};
-    const bool hipMissing=gpu.rx7000?!pipeline::Rdna3NrBackend::hipRuntimeAvailable():
-        GetSystemDirectoryW(systemDir, MAX_PATH)&&!exists(std::filesystem::path(systemDir)/"amdhip64_7.dll")&&!GetModuleHandleW(L"amdhip64_7.dll");
+    const bool systemHipPresent=GetSystemDirectoryW(systemDir, MAX_PATH)&&(exists(std::filesystem::path(systemDir)/"amdhip64_7.dll")||GetModuleHandleW(L"amdhip64_7.dll"));
+    const bool probeUsable=amdNrLine!=pipeline::AmdNrLine::None&&(!pipeline::amdNrNeedsHipPreflight(amdNrLine)||systemHipPresent);
+    const bool hipMissing=amdNrFiles&&!rdna3Usable&&!probeUsable;
     if (hipMissing) {
         auto cap = out.value("nr4").toMap();
         if (cap.value("available").toBool()) { cap["available"] = false; cap["reason"] = QObject::tr("需要 AMD HIP 7 驱动运行组件"); out["nr4"] = cap; }
@@ -106,6 +163,31 @@ static QVariantMap scanEffectCapabilities() {
     for (int q : {16, 17, 18, 19}) add("sr" + QString::number(q), H::Nvidia, vfxSr, QObject::tr("需要 NVIDIA RTX 显卡"));
     for (int q : {21, 23}) add("sr" + QString::number(q), H::NvidiaAmpere, vfxSr, QObject::tr("需要 NVIDIA RTX 30 及更新显卡"));
     add("sr5", H::CrossVendor, fsrLoader && exists(fsr / "amd_fidelityfx_upscaler_dx12.dll"), QObject::tr("需要支持 DirectX 12 的硬件显卡"));
+    // Vendor-neutral spatial SR (IDs 24..29): no motion vectors, run on the
+    // NVIDIA, AMD and Intel adapters the existing CrossVendor / AmdFrc gates
+    // already describe. The model and runtime files decide availability, and a
+    // supported adapter with the component missing says which file it wants.
+    auto addWithMissingReason = [&](const QString& id, H hardware, bool files,
+                                    const QString& requirement, const QString& missingReason) {
+        const bool supported = ui::hardwareSupports(hardware, gpu);
+        out[id] = QVariantMap{
+            {"available", supported && files},
+            {"reason", !supported ? requirement : !files ? missingReason : QString{}}};
+    };
+    addWithMissingReason("sr24", H::CrossVendor, spatialSrModelExists(L"artcnn_c4f16.onnx"),
+        QObject::tr("需要支持 DirectX 12 的硬件显卡"), QObject::tr("缺少 ArtCNN C4F16 权重文件"));
+    addWithMissingReason("sr25", H::CrossVendor, spatialSrModelExists(L"artcnn_c4f32.onnx"),
+        QObject::tr("需要支持 DirectX 12 的硬件显卡"), QObject::tr("缺少 ArtCNN C4F32 权重文件"));
+    // The AMF backends use the runtime the AMD driver installs; nothing ships.
+    add("sr26", H::AmdFrc, gfx::AmfHqScalerBackend::compiledIn() && gfx::AmfHqScalerBackend::runtimeInstalled(), QObject::tr("需要 AMD 显卡（驱动自带 AMF 运行库）"));
+    add("sr27", H::AmdFrc, gfx::AmfVqEnhancerBackend::compiledIn() && gfx::AmfVqEnhancerBackend::runtimeInstalled(), QObject::tr("需要 AMD 显卡（驱动自带 AMF 运行库）"));
+    const bool ortRuntime = ortDmlRuntimeExists();
+    addWithMissingReason("sr28", H::CrossVendor, ortRuntime && spatialSrModelExists(L"span.onnx"),
+        QObject::tr("需要支持 DirectX 12 的硬件显卡"),
+        !ortRuntime ? QObject::tr("缺少 ONNX Runtime / DirectML 运行组件") : QObject::tr("缺少 SPAN ONNX 模型文件"));
+    addWithMissingReason("sr29", H::CrossVendor, ortRuntime && spatialSrModelExists(L"realplksr.onnx"),
+        QObject::tr("需要支持 DirectX 12 的硬件显卡"),
+        !ortRuntime ? QObject::tr("缺少 ONNX Runtime / DirectML 运行组件") : QObject::tr("缺少 RealPLKSR ONNX 模型文件"));
     add("anr", H::CrossVendor, ngx::AnrProvider::available(nr.wstring()), QObject::tr("需要支持 DirectX 12 的硬件显卡"));
     add("dlss", H::Nvidia, exists(nr / "nvngx_dlssg.dll"), QObject::tr("需要 NVIDIA RTX 显卡"));
     add("vfg", H::Vfg, pipeline::VfgBackend::runtimeAvailable(nr.wstring()), QObject::tr("需要 NVIDIA RTX 30 / 40 / 50（30 系为实验兼容）"));
@@ -148,8 +230,12 @@ QString unavailableEffects(const engine::EnhancementSettings& settings) {
     QStringList requested;
     if (settings.nr) requested << "nr" + QString::number(int(engine::currentNrRuntime(settings.nrRuntime)));
     if (settings.sr) requested << "sr" + QString::number(settings.videoSrQuality);
-    // Double SR runs a second pass with its own backend (any SR algorithm).
-    if (settings.sr && settings.dualSrEnabled) requested << "sr" + QString::number(settings.dualSrQuality);
+    // Double SR runs a second pass only when neither pass is a Phase-1 spatial SR method
+    // (spatial SR runs single-stage even if a saved preset carries a dormant dualSrEnabled flag).
+    if (settings.sr && settings.dualSrEnabled &&
+        !engine::spatialCnnVideoSr(settings.videoSrQuality) &&
+        !engine::spatialCnnVideoSr(settings.dualSrQuality))
+        requested << "sr" + QString::number(settings.dualSrQuality);
     if (settings.multiplier > 1) requested << fgEffectId(settings.frameGenerationBackend);
     if (settings.videoHdr.enabled) requested << "hdr";
     for (const auto& id : requested) {
@@ -198,11 +284,13 @@ QString disableUnavailableEffects(engine::ChainConfiguration& configuration) {
             !caps.value("flow0").toMap().value("available").toBool())
             globals.opticalFlowBackend = engine::OpticalFlowBackend::AmdFidelityFx;
         // A double SR second algorithm this card cannot run (a profile moved from
-        // an NVIDIA card) follows the base algorithm, or double SR turns off.
+        // an NVIDIA card) follows the base algorithm when that base supports double SR,
+        // or double SR turns off. Phase-1 spatial SR methods never become the second pass.
         const auto runs = [&](uint32_t quality) { return caps.value("sr" + QString::number(quality)).toMap().value("available").toBool(); };
-        if (globals.dualSrEnabled && !runs(globals.dualSrQuality)) {
+        const auto dualRuns = [&](uint32_t quality) { return !engine::spatialCnnVideoSr(quality) && runs(quality); };
+        if (globals.dualSrEnabled && !dualRuns(globals.dualSrQuality)) {
             const auto saved = globals.dualSrQuality;
-            if (runs(globals.videoSrQuality)) globals.dualSrQuality = globals.videoSrQuality;
+            if (dualRuns(globals.videoSrQuality)) globals.dualSrQuality = globals.videoSrQuality;
             else globals.dualSrEnabled = false;
             veyra::log::warn("effect-availability", std::format("double SR second quality={} unavailable; second={} enabled={}",
                 saved, globals.dualSrQuality, globals.dualSrEnabled));
@@ -233,7 +321,7 @@ QVariantMap QmlPlayerBridge::effectAvailability(const QString& id) const {
 QVariantList QmlPlayerBridge::nrRuntimeChoices() const {
     QVariantList choices;
     const auto caps = effectCapabilities();
-    for (const auto& entry : std::initializer_list<std::pair<int, QString>>{{2, "RTX 20–50 · SF 310.9.16"}, {3, tr("RTX 50 · NVIDIA 原版")}, {4, effectGpu().rx7000?tr("RX 7000 · RedDuke（实验）"):tr("RX 9000 · lmxxf（实验）")}}) {
+    for (const auto& entry : std::initializer_list<std::pair<int, QString>>{{2, "RTX 20–50 · SF 310.9.16"}, {3, tr("RTX 50 · NVIDIA 原版")}, {4, tr("RX 7000 / 9000 · AMD NR（实验）")}}) {
         const auto cap = caps.value("nr" + QString::number(entry.first)).toMap();
         choices << QVariantMap{{"id", QString::number(entry.first)}, {"label", entry.second}, {"disabled", !cap.value("available").toBool()}, {"note", cap.value("reason")}};
     }
@@ -247,7 +335,15 @@ QVariantList QmlPlayerBridge::srBackendChoices() const {
     struct Entry { QString id; int capability; QString label; };
     for (const auto& entry : std::initializer_list<Entry>{{"0", 0, "DLSS SR"}, {"rtx", 4, tr("RTX 视频超分 · 标准")},
             {"rtx-hb", 16, tr("RTX 视频超分 · 高码率")}, {"rtx-st", 21, tr("RTX 视频超分 · 流媒体")},
-            {"5", 5, effectGpu().vendor == 0x1002 ? tr("FSR 3.1 / 4 · 自动兼容") : QString("FSR 3.1")}}) {
+            {"5", 5, effectGpu().vendor == 0x1002 ? tr("FSR 3.1 / 4 · 自动兼容") : QString("FSR 3.1")},
+            // Spatial single-pass SR (IDs 24..29). "AMD AMF Video SR" is a brand
+            // name, kept untranslated like "DLSS SR".
+            {"24", 24, tr("ArtCNN C4F16 · 2× 超分")},
+            {"25", 25, tr("ArtCNN C4F32 · 2× 超分")},
+            {"26", 26, QStringLiteral("AMD AMF Video SR")},
+            {"27", 27, tr("AMD AMF 画质增强")},
+            {"28", 28, tr("DirectML · SPAN 超分")},
+            {"29", 29, tr("DirectML · RealPLKSR 超分")}}) {
         const auto cap = caps.value("sr" + QString::number(entry.capability)).toMap();
         choices << QVariantMap{{"id", entry.id}, {"label", entry.label}, {"disabled", !cap.value("available").toBool()}, {"note", cap.value("reason")}};
     }

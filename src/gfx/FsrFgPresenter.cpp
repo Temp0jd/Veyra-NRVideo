@@ -1,5 +1,6 @@
 #include "veyra/gfx/FsrFgPresenter.h"
 
+#include "veyra/gfx/FfxVersionSelect.h"
 #include "veyra/Log.h"
 #include "veyra/RuntimePaths.h"
 
@@ -140,17 +141,17 @@ bool FsrFgPresenter::initializeIndependent(ID3D12Device* device, uint32_t width,
         log::error("fsr-fg", std::format("provider inventory read result={} count={} capacity={}", returnName(result), count, ids.size()));
         p.failed = true; return false;
     }
-    uint64_t selected = 0;
-    const char* family = requireMl ? "4.0." : "3.1.";
+    const uint32_t requiredMajor = requireMl ? 4u : 3u;
     for (size_t i = 0; i < size_t(count); ++i) {
         const std::string_view name = names[i] ? names[i] : "unknown";
-        log::info("fsr-fg", std::format("inventory id=0x{:X} name={} request={}", ids[i], name, family));
-        if (!selected && name.find(family) != std::string_view::npos) selected = ids[i];
+        log::info("fsr-fg", std::format("inventory id=0x{:X} name={} requestMajor={}", ids[i], name, requiredMajor));
     }
-    if (!selected) {
-        log::error("fsr-fg", std::format("requested FSR {} provider unavailable on this adapter; no version fallback", family));
+    const auto best = selectBestFfxVersion(ids, names, requiredMajor);
+    if (!best.matched) {
+        log::error("fsr-fg", std::format("requested FSR {}.x provider unavailable on this adapter; no version fallback", requiredMajor));
         p.failed = true; return false;
     }
+    const uint64_t selected = best.id;
     ffxOverrideVersion overrideVersion{};
     overrideVersion.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
     overrideVersion.versionId = selected;
@@ -178,8 +179,11 @@ bool FsrFgPresenter::initializeIndependent(ID3D12Device* device, uint32_t width,
     actual.header.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION;
     result = p.functions.Query(&p.fgContext, &actual.header);
     p.providerVersion = actual.versionName ? actual.versionName : "unknown";
-    if (result != FFX_API_RETURN_OK || actual.versionId != selected ||
-        p.providerVersion.find(family) == std::string::npos) {
+    const auto actualSemver = parseFfxSemver(p.providerVersion);
+    const bool majorOk = actualSemver.valid
+        ? (actualSemver.major == requiredMajor)
+        : (p.providerVersion.find(std::to_string(requiredMajor) + ".") != std::string::npos);
+    if (result != FFX_API_RETURN_OK || actual.versionId != selected || !majorOk) {
         log::error("fsr-fg", std::format("actual provider rejected query={} requested=0x{:X} actual=0x{:X} name={}", returnName(result), selected, actual.versionId, p.providerVersion));
         p.failed = true; return false;
     }

@@ -60,6 +60,7 @@ struct StageRequest {
     bool stillImage=false;   // image preview/processing: no NR-first order
     bool exportJob=false;    // selected NR size, bounded AMD NR, no present-sink FG/NR-first order
     bool nvidiaAdapter=true;
+    bool amdAdapter=false;   // AMD adapter (for AMF video SR even when NR is off/non-AMD)
     bool amdNr=false;        // AMD adapter: NR runs on the lmxxf runtime (no NGX)
     // Raw capture-card or screen frames: nothing compressed for native-size RTX Video SR to repair.
     bool uncompressedSource=false;
@@ -71,7 +72,10 @@ struct StageRequest {
 // others on NVIDIA - and not on a still image with an FSR pass (FSR skips still
 // images). Otherwise the base keeps its single pass, saved second fields intact.
 inline bool dualSrRuns(const EnhancementSettings& s,bool nvidiaAdapter,bool stillImage=false){
-    const auto runs=[nvidiaAdapter](uint32_t quality){return nvidiaAdapter||quality==kVideoSrFsr;};
+    // Phase-1 spatial CNN/vendor SR (24..29) is single-pass: its backends have no
+    // second-pass contract, so a saved double-SR flag never activates them on any
+    // adapter (NVIDIA, AMD or Intel). The saved second fields stay intact.
+    const auto runs=[nvidiaAdapter](uint32_t quality){return !spatialCnnVideoSr(quality)&&(nvidiaAdapter||quality==kVideoSrFsr);};
     return s.dualSrEnabled&&runs(s.videoSrQuality)&&runs(s.dualSrQuality)&&
         !(stillImage&&(s.videoSrQuality==kVideoSrFsr||s.dualSrQuality==kVideoSrFsr));
 }
@@ -152,7 +156,18 @@ inline pipeline::ResolutionPlan describeStages(const StageRequest& request,const
     // (5090 field log 57: 4K->4K VSR cost ~8.7 ms a frame and pushed 60 fps over budget).
     const bool nativeVideoRestore=request.sr&&!request.stillImage&&!request.uncompressedSource&&request.nvidiaAdapter&&
         ngxVideoSr(settings.videoSrQuality);
-    desc.enableSr=(plan.srApplied||nativeVideoRestore)&&(request.nvidiaAdapter||settings.videoSrQuality==kVideoSrFsr);
+    const bool amdAdapter=request.amdAdapter||request.amdNr;
+    // AMF VQ Enhancer (ID 27) is a 1x video quality enhancer (FCR): it also runs when the
+    // source already sits at the target size on an AMD adapter. ArtCNN/AMF HQScaler/ORT-DML
+    // only enlarge and stay bound to plan.srApplied like every other SR backend.
+    const bool nativeAmfVqEnhance=request.sr&&!request.stillImage&&amdAdapter&&amfVqVideoSr(settings.videoSrQuality);
+    // Spatial CNN/vendor-neutral SR runs on AMD/Intel adapters too, not only under NGX.
+    // AMF video SR (26/27) requires an AMD GPU driver runtime.
+    const bool srAdapterAllowed=amfVideoSr(settings.videoSrQuality)
+        ? amdAdapter
+        : (request.nvidiaAdapter||settings.videoSrQuality==kVideoSrFsr||
+           artcnnVideoSr(settings.videoSrQuality)||dmlVideoSr(settings.videoSrQuality));
+    desc.enableSr=(plan.srApplied||nativeVideoRestore||nativeAmfVqEnhance)&&srAdapterAllowed;
     desc.enableNr=request.nr&&(request.nvidiaAdapter||request.amdNr)&&(!settings.nrLayerCount||settings.activeNrLayerCount()>0);
     desc.nrBeforeSr=!request.stillImage&&!request.exportJob&&lowLatency&&desc.enableNr&&desc.enableSr;
     desc.enableNvofStandalone=desc.enableNr;
@@ -164,6 +179,10 @@ inline pipeline::ResolutionPlan describeStages(const StageRequest& request,const
     desc.fgMultiplier=request.fgMultiplier;
     desc.videoSrQuality=settings.videoSrQuality;
     desc.dlssSrModel=settings.dlssSrModel;
+    desc.fsrSrVersionMode=settings.fsrSrVersionMode;
+    desc.fsrSrReactiveMask=settings.fsrSrReactiveMask;
+    desc.fsrSrSharpening=settings.fsrSrSharpening;
+    desc.fsrSrSharpness=settings.fsrSrSharpness;
     describeNrLayers(settings,desc);
     desc.frameGenerationBackend=settings.frameGenerationBackend;
     desc.vfgQuality=settings.vfgQuality;
@@ -192,6 +211,9 @@ inline pipeline::ResolutionPlan describeStages(const StageRequest& request,const
     desc.contentRate=settings.content;
     desc.opticalFlowBackend=settings.opticalFlowBackend;
     desc.amdFlowHalfResolution=settings.amdFlowHalfResolution;desc.fgMotionRefine=settings.fgMotionRefine;desc.dlssgLite=settings.dlssgLite;desc.vfgAutoRegulate=settings.vfgAutoRegulate;desc.hudLock=settings.hudLock;
+    desc.amfFrcProfile=settings.amfFrcProfile;
+    desc.amfFrcMvSearch=settings.amfFrcMvSearch;
+    desc.amfFrcUseFutureFrame=settings.amfFrcUseFutureFrame;
     desc.nrLayersExtent.clear();
     for(uint32_t i=0;i<chain.nodeCount;++i){
         auto& node=chain.nodes[i];

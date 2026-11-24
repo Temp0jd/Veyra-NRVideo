@@ -27,6 +27,10 @@ uint wordAt(uint y,uint index){
     const uint base=index*4;
     return byteAt(y,base)|(byteAt(y,base+1)<<8)|(byteAt(y,base+2)<<16)|(byteAt(y,base+3)<<24);
 }
+float2 samplePacked422Uv(uint pairIdx, uint y, uint packing) {
+    const float4 pair = packedBytes[uint2(pairIdx, y)];
+    return packing == 4 ? pair.xz : pair.wy;
+}
 [numthreads(16,16,1)]
 void main(uint3 p : SV_DispatchThreadID) {
     if (p.x >= width || p.y >= height) return;
@@ -47,12 +51,21 @@ void main(uint3 p : SV_DispatchThreadID) {
         rgb=float3((v>>22)&1023,(v>>12)&1023,(v>>2)&1023)/1023.0;
         if(limitedU!=0)rgb=saturate((rgb-64.0/1023.0)*(1023.0/876.0));
     } else if (packing == 4 || packing == 5) {
-        const float4 pair = packedBytes[uint2(p.x / 2, p.y)];
+        const uint k = p.x >> 1;
+        const float4 pair = packedBytes[uint2(k, p.y)];
         const bool second = (p.x & 1) != 0;
-        float y, cb, cr;
-        if (packing == 4) { y = second ? pair.w : pair.y; cb = pair.x; cr = pair.z; }
-        else { y = second ? pair.z : pair.x; cb = pair.w; cr = pair.y; }
-        float2 uv = float2(cb, cr) - 128.0 / 255.0;
+        float y = packing == 4 ? (second ? pair.w : pair.y) : (second ? pair.z : pair.x);
+        float2 uvRaw = packing == 4 ? pair.xz : pair.wy;
+        if (second) {
+            const uint maxPair = width > 1 ? ((width - 1) >> 1) : 0;
+            const float2 u0 = samplePacked422Uv(k > 0 ? k - 1 : 0, p.y, packing);
+            const float2 u1 = uvRaw;
+            const float2 u2 = samplePacked422Uv(min(k + 1, maxPair), p.y, packing);
+            const float2 u3 = samplePacked422Uv(min(k + 2, maxPair), p.y, packing);
+            const float2 catmull = (-u0 + 9.0 * u1 + 9.0 * u2 - u3) * 0.0625;
+            uvRaw = clamp(catmull, min(u1, u2), max(u1, u2));
+        }
+        float2 uv = uvRaw - 128.0 / 255.0;
         if (limited > 0.5) { y = (y - 16.0 / 255.0) * (255.0 / 219.0); uv *= 255.0 / 224.0; }
         rgb = matrix709 > 0.5 ? float3(y + 1.5748 * uv.y, y - 0.187324 * uv.x - 0.468124 * uv.y, y + 1.8556 * uv.x)
                               : float3(y + 1.402 * uv.y, y - 0.344136 * uv.x - 0.714136 * uv.y, y + 1.772 * uv.x);

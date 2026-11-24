@@ -9,6 +9,7 @@
 // ring (NR evaluates on a fresh list - snippet constraint).
 #include "veyra/pipeline/EnhanceGraph.h"
 #include "veyra/pipeline/Rdna3NrBackend.h"
+#include "veyra/pipeline/AmdNrBackendFactory.h"
 #include "veyra/pipeline/AmdNrProvider.h"
 #include "veyra/pipeline/VfgBackend.h"
 #include "veyra/engine/GraphDescription.h"
@@ -38,6 +39,12 @@
 #include "veyra/gfx/FsrSrBackend.h"
 #include "veyra/gfx/FsrFgPresenter.h"
 #include "veyra/gfx/AmfFrcBackend.h"
+// Phase-1 spatial single-frame SR backends (24..29).
+#include "veyra/gfx/AmfHqScalerBackend.h"
+#include "veyra/gfx/AmfVqEnhancerBackend.h"
+#include "veyra/pipeline/ArtCnnBackend.h"
+#include "veyra/pipeline/OrtDmlSrBackend.h"
+#include "veyra/RuntimePaths.h"
 #include "veyra/ngx/DlssNrParameters.h"
 #include "veyra/ngx/DlssNrRuntimeAdapter.h"
 #include "veyra/ngx/DlssSrBackend.h"
@@ -98,7 +105,56 @@ bool mixedDualSr(const EnhanceGraphDesc& d){
     return d.dualSr&&(!engine::rtxVideoSr(d.videoSrQuality)||!engine::rtxVideoSr(d.dualSrQuality));
 }
 const char* srRuntimeName(uint32_t quality){
-    return quality==0?"dlss":quality==engine::kVideoSrFsr?"fsr":engine::vfxVideoSr(quality)?"video-effects":"ngx";
+    return quality==0?"dlss":engine::artcnnVideoSr(quality)?"artcnn":engine::amfHqVideoSr(quality)?"amf-hq":
+        engine::amfVqVideoSr(quality)?"amf-vq":engine::dmlVideoSr(quality)?"dml":
+        quality==engine::kVideoSrFsr?"fsr":engine::vfxVideoSr(quality)?"video-effects":"ngx";
+}
+
+// Restricted lookup for the spatial SR models and the ONNX Runtime DLL. The
+// order matches beauty::locateFaceModel() (src/beauty/FaceTracker.cpp) and the
+// capability probe (src/ui/bridge/Hardware.cpp) so a packaged install finds its
+// files in the same three places. Nothing is ever resolved against the current
+// working directory.
+constexpr DWORD kSpatialProbePathChars=32768;
+std::filesystem::path executableDirectory(){
+    wchar_t exe[kSpatialProbePathChars]{};
+    const DWORD length=GetModuleFileNameW(nullptr,exe,kSpatialProbePathChars);
+    // An unknown module path stays empty: probing "models" relative to the
+    // working directory would step outside the restricted absolute-only rule.
+    return length&&length<kSpatialProbePathChars?std::filesystem::path(exe).parent_path():std::filesystem::path{};
+}
+std::filesystem::path locateSpatialSrModel(const wchar_t* fileName){
+    if(!fileName||!*fileName)return {};
+    const auto root=runtime::applicationRoot();
+    const std::filesystem::path folders[]={root/L"runtime"/L"models",root/L"runtime_local"/L"models",executableDirectory()/L"models"};
+    std::error_code ec;
+    for(const auto& folder:folders){
+        if(folder.empty()||!folder.is_absolute())continue;
+        if(std::filesystem::is_regular_file(folder/fileName,ec))return folder/fileName;
+    }
+    return {};
+}
+// VEYRA_ONNXRUNTIME_DIR wins only as an absolute path: a relative override would
+// resolve against the working directory and break the restricted absolute-only
+// loading rule.
+std::filesystem::path locateOrtDmlRuntimeDll(){
+    std::error_code ec;
+    wchar_t overrideDirectory[kSpatialProbePathChars]{};
+    const DWORD length=GetEnvironmentVariableW(L"VEYRA_ONNXRUNTIME_DIR",overrideDirectory,kSpatialProbePathChars);
+    const std::filesystem::path overridePath(overrideDirectory);
+    if(length&&length<kSpatialProbePathChars&&overridePath.is_absolute()&&
+       std::filesystem::is_regular_file(overridePath/L"onnxruntime.dll",ec))
+        return overridePath/L"onnxruntime.dll";
+    const auto root=runtime::applicationRoot();
+    const std::filesystem::path candidates[]={
+        root/L"runtime"/L"models"/L"onnxruntime"/L"onnxruntime.dll",
+        root/L"runtime_local"/L"models"/L"onnxruntime"/L"onnxruntime.dll",
+        executableDirectory()/L"models"/L"onnxruntime"/L"onnxruntime.dll"};
+    for(const auto& candidate:candidates){
+        if(candidate.empty()||!candidate.is_absolute())continue;
+        if(std::filesystem::is_regular_file(candidate,ec))return candidate;
+    }
+    return {};
 }
 
 // N1 packed capture ingress helpers. Codes match pipeline::packedInputCode:
@@ -714,6 +770,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
         veyra::log::info("graph","diagnostic SR motion override active; no product entry point enables this");
     }
     desc_ = desc;lastSourceColor_={};tracker_={};prevValid_=false;fgHistorySkipped_=false;cadence_.reset();scene_.reset();sceneLastSourceId_=0;previousLuma_.clear();
+    fsrSrPrevSlot_=firstFsrSrPrevSlot_=0;fsrSrPrevValid_=firstFsrSrPrevValid_=false;
     if(!engine::validVideoSrQuality(desc.videoSrQuality)){veyra::log::error("graph",std::format("invalid video SR quality value={}",desc.videoSrQuality));return false;}
     srcW_ = desc.sourceWidth;
     srcH_ = desc.sourceHeight;
@@ -767,7 +824,12 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     veyra::log::info("pipeline-order",desc.splitNrAcrossSr()?"NR(source) -> SR -> NR(work) -> FG (node preview)":desc.nrBeforeSr?"NR -> residual(source) -> SR -> FG (experimental preview)":"SR -> NR -> residual -> FG");
     if(!desc.videoHdr.valid()||(desc.hdrOutput&&!desc.hdrInput&&!desc.convertVideoHdr())){veyra::log::error("hdr","HDR output requires native HDR input or explicit Video HDR conversion");return false;}
     const bool videoRestore=!desc.stillImage&&desc.videoSrQuality>=1&&desc.videoSrQuality<=4;
-    srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_ || videoRestore || srPrescaleActive() || srResolveActive());
+    // The AMF VQ enhancer is a same-size stage (srcW_ == workW_ is its normal
+    // case), so it has to keep the SR stage alive on its own; without this the
+    // direct-base path would alias srcRgba_ and the enhancer would read and
+    // write one texture.
+    const bool amfVqEnhance=!desc.stillImage&&engine::amfVqVideoSr(desc.videoSrQuality);
+    srEnabled_ = desc.enableSr && (srcW_ != workW_ || srcH_ != workH_ || videoRestore || amfVqEnhance || srPrescaleActive() || srResolveActive());
     lmxxfNr_ = context_.adapter().vendorId == 0x1002 || desc.nrRuntime == engine::NrRuntime::LmxxfAmd;
     if(context_.adapter().vendorId==0x1002 && desc_.opticalFlowBackend==engine::OpticalFlowBackend::Nvidia)
         desc_.opticalFlowBackend=engine::OpticalFlowBackend::AmdFidelityFx;
@@ -827,6 +889,11 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
         if(desc_.dualSr&&desc_.dualSrQuality==0)grow(workW_,workH_);
     }
     const bool firstVideoSr=desc_.dualSr&&engine::rtxVideoSr(desc_.videoSrQuality);
+    const bool firstFsrFlowAdapt=srEnabled_&&(nvofW_!=srcW_||nvofH_!=srcH_)&&((!desc_.dualSr&&desc_.videoSrQuality==engine::kVideoSrFsr)||desc_.firstSrRuns(engine::kVideoSrFsr));
+    const bool finalFsrPass=srEnabled_&&desc_.finalSrQuality()==engine::kVideoSrFsr;
+    const bool firstFsrPass=srEnabled_&&desc_.firstSrRuns(engine::kVideoSrFsr);
+    const uint64_t fsrExtraBytes=(firstFsrFlowAdapt?uint64_t(srcW_)*srcH_*4u:0)+
+        (desc_.fsrSrReactiveMask?((finalFsrPass?uint64_t(srInW_)*srInH_*17u:0)+(firstFsrPass?uint64_t(srcW_)*srcH_*17u:0)):0);
     const uint64_t dualBytes=desc_.dualSr?uint64_t(desc_.firstSrWidth)*desc_.firstSrHeight*(firstVideoSr?12u:8u)+(firstVideoSr?uint64_t(srcW_)*srcH_*4u:0)+
         (desc_.firstSrRuns(0)?uint64_t(desc_.firstSrWidth)*desc_.firstSrHeight*4u:0)+(desc_.dualSrQuality==engine::kVideoSrFsr?uint64_t(srInW_)*srInH_*4u:0)+
         (temporalDual?uint64_t(fsrAuxW_)*fsrAuxH_*8u:0):0;
@@ -856,7 +923,7 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     const bool reuseRequested=desc_.nrReusePreview&&desc_.enableNr&&desc_.nrReuse!=engine::NrReuseMode::Off;
     const uint64_t reuseBytes=reuseRequested?uint64_t(desc_.finalNrAfterSr()?workW_:srcW_)*(desc_.finalNrAfterSr()?workH_:srcH_)*16u+
         uint64_t(nvofW_)*nvofH_*20u:0;
-    const uint64_t estimate=reuseBytes+temporalHdrBytes+dlaaBytes+vfxSrBytes+dualBytes+supersampleBytes+uint64_t(workW_)*workH_*(76u+4u*generatedTextures)+vfgSharedBytes
+    const uint64_t estimate=fsrExtraBytes+reuseBytes+temporalHdrBytes+dlaaBytes+vfxSrBytes+dualBytes+supersampleBytes+uint64_t(workW_)*workH_*(76u+4u*generatedTextures)+vfgSharedBytes
         +nrTextureBytes+fullLayerBytes
         +uint64_t(srcW_)*srcH_*(32u+(desc_.protectionBeforeSr()?8u:0u))+temporalBytes+tailColorBytes+interProtectionBytes
         +(flowRefine_?uint64_t(nvofW_)*nvofH_*(flowConsistency_?13u:flowClaims_?18u:12u)+uint64_t(workW_)*workH_*4u:0)
@@ -900,6 +967,10 @@ bool EnhanceGraph::initialize(const EnhanceGraphDesc& desc)
     if (!initZeroAndDepthTextures()) return false;
     if (!initNvof()) { failedBackend_=engine::FailedBackend::OpticalFlow; return false; }
     if (!initFsrSr()) return false;
+    if (!initArtcnnSr()) return false;
+    if (!initAmfHqSr()) return false;
+    if (!initAmfVqSr()) return false;
+    if (!initOrtDmlSr()) return false;
     if (!initFsrFg()) return false;
     if (!initVfg()) return false;
     if (!initAmfFrc()) return false;
@@ -992,6 +1063,23 @@ bool EnhanceGraph::createResources()
         }
         if(desc_.firstSrRuns(0)&&!(firstSrFlow_=makeTexture(context_.device(),desc_.firstSrWidth,desc_.firstSrHeight,DXGI_FORMAT_R16G16_FLOAT,true)))return false;
         if(desc_.dualSrQuality==engine::kVideoSrFsr&&!(secondSrFlow_=makeTexture(context_.device(),srInW_,srInH_,DXGI_FORMAT_R16G16_FLOAT,true)))return false;
+    }
+    if(srEnabled_&&(nvofW_!=srcW_||nvofH_!=srcH_)&&((!desc_.dualSr&&desc_.videoSrQuality==engine::kVideoSrFsr)||desc_.firstSrRuns(engine::kVideoSrFsr))){
+        if(!(firstSrFlow_=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R16G16_FLOAT,true)))return false;
+    }
+    if(srEnabled_&&desc_.fsrSrReactiveMask){
+        if(desc_.finalSrQuality()==engine::kVideoSrFsr){
+            fsrSrReactive_=makeTexture(context_.device(),srInW_,srInH_,DXGI_FORMAT_R8_UNORM,true);
+            fsrSrPrevColor_[0]=makeTexture(context_.device(),srInW_,srInH_,DXGI_FORMAT_R16G16B16A16_FLOAT,true);
+            fsrSrPrevColor_[1]=makeTexture(context_.device(),srInW_,srInH_,DXGI_FORMAT_R16G16B16A16_FLOAT,true);
+            if(!fsrSrReactive_||!fsrSrPrevColor_[0]||!fsrSrPrevColor_[1])return false;
+        }
+        if(desc_.firstSrRuns(engine::kVideoSrFsr)){
+            firstFsrSrReactive_=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R8_UNORM,true);
+            firstFsrSrPrevColor_[0]=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R16G16B16A16_FLOAT,true);
+            firstFsrSrPrevColor_[1]=makeTexture(context_.device(),srcW_,srcH_,DXGI_FORMAT_R16G16B16A16_FLOAT,true);
+            if(!firstFsrSrReactive_||!firstFsrSrPrevColor_[0]||!firstFsrSrPrevColor_[1])return false;
+        }
     }
     // FSR upscaling needs a render-extent depth; Veyra has no source-resolution
     // depth source, so this is the same explicit constant far depth the
@@ -1344,6 +1432,38 @@ bool EnhanceGraph::fsrSrEnabled() const
            (!firstFsr||(firstFsrSrBackend_!=nullptr&&firstFsrSrBackend_->created()));
 }
 
+// Phase-1 spatial SR (24..29). "Requested" is what the settings and the extents
+// ask for, "enabled" is what really opened; the engine turns the gap into a
+// failed SR backend. None of these stages needs guidance motion or a second
+// pass, and ArtCNN is the only one with a hard 2x extent requirement.
+bool EnhanceGraph::artcnnSrRequested() const
+{
+    return srEnabled_&&!desc_.dualSr&&engine::artcnnVideoSr(desc_.videoSrQuality)&&
+        ArtCnnBackend::supportedRatio(srcW_,srcH_,workW_,workH_);
+}
+bool EnhanceGraph::artcnnSrEnabled() const { return artcnnSrBackend_&&artcnnSrBackend_->created(); }
+bool EnhanceGraph::amfHqSrRequested() const
+{
+    return srEnabled_&&!desc_.dualSr&&engine::amfHqVideoSr(desc_.videoSrQuality)&&(srcW_!=workW_||srcH_!=workH_);
+}
+bool EnhanceGraph::amfHqSrEnabled() const { return amfHqSrBackend_&&amfHqSrBackend_->ready(); }
+// The VQ enhancer works at the target extent, so it is the one spatial stage
+// that also runs without enlarging; a still image never takes it (the image
+// path has no frame cadence for the component).
+bool EnhanceGraph::amfVqSrRequested() const
+{
+    return srEnabled_&&!desc_.dualSr&&!desc_.stillImage&&engine::amfVqVideoSr(desc_.videoSrQuality);
+}
+bool EnhanceGraph::amfVqSrEnabled() const { return amfVqSrBackend_&&amfVqSrBackend_->ready(); }
+bool EnhanceGraph::ortDmlSrRequested() const
+{
+    return srEnabled_&&!desc_.dualSr&&engine::dmlVideoSr(desc_.videoSrQuality)&&(srcW_!=workW_||srcH_!=workH_);
+}
+bool EnhanceGraph::ortDmlSrEnabled() const
+{
+    return ortDmlSrBackend_&&ortDmlSrBackend_->ready()&&ortDmlSrBackend_->prepared();
+}
+
 void EnhanceGraph::applyAdaMfgUnlock()
 {
     const auto& adapter = context_.adapter();
@@ -1512,9 +1632,10 @@ bool EnhanceGraph::initFsrSr()
     // the final pass renders the reduced first result, the first pass the source.
     const bool finalFsr=desc_.finalSrQuality()==engine::kVideoSrFsr,firstFsr=desc_.firstSrRuns(engine::kVideoSrFsr);
     const uint32_t renderW=desc_.dualSr?srInW_:srcW_,renderH=desc_.dualSr?srInH_:srcH_;
+    const uint32_t fsrPreferredMajor=desc_.fsrSrVersionMode==1?3u:desc_.fsrSrVersionMode==2?4u:0u;
     const auto create=[&](std::unique_ptr<gfx::FsrSrBackend>& backend,uint32_t inW,uint32_t inH,uint32_t outW,uint32_t outH,const char* pass){
         backend=std::make_unique<gfx::FsrSrBackend>();
-        if(!backend->initialize(context_.device(),inW,inH,outW,outH,hdr)){
+        if(!backend->initialize(context_.device(),inW,inH,outW,outH,hdr,fsrPreferredMajor)){
             backend.reset();
             // The engine checks fsrSrRequested() && !fsrSrEnabled() after the graph
             // is created and disables the stage with a user-visible warning, so a
@@ -1522,13 +1643,173 @@ bool EnhanceGraph::initFsrSr()
             veyra::log::error("fsr-sr", std::format("AMD FSR upscaling unavailable{}; the engine will disable the stage",pass));
             return false;
         }
-        veyra::log::info("fsr-sr", std::format("selected{} render={}x{} output={}x{} provider={} hdr={}",pass,inW,inH,outW,outH,backend->providerVersion(),hdr));
+        veyra::log::info("fsr-sr", std::format("selected{} render={}x{} output={}x{} provider={} fsr4={} preferredMajor={} hdr={}",pass,inW,inH,outW,outH,backend->providerVersion(),backend->isFsr4()?1:0,fsrPreferredMajor,hdr));
         return true;
     };
     if(finalFsr&&!create(fsrSrBackend_,renderW,renderH,workW_,workH_,desc_.dualSr?" second pass":"")){failedBackend_=engine::FailedBackend::None;return true;}
     if(firstFsr&&!create(firstFsrSrBackend_,srcW_,srcH_,desc_.firstSrWidth,desc_.firstSrHeight," first pass")){failedBackend_=engine::FailedBackend::None;return true;}
     failedBackend_=engine::FailedBackend::None;
     return true;
+}
+
+// Phase-1 spatial single-frame SR (IDs 24..29). Each initializer follows the
+// initFsrSr() contract: a backend that cannot open is not a graph failure. The
+// stage is left unopened and the engine turns
+// requested() && !enabled() into a user-visible SR degradation, so a missing
+// model file or an absent AMF/DirectML runtime never blocks basic playback.
+bool EnhanceGraph::initArtcnnSr()
+{
+    if (!srEnabled_ || desc_.dualSr || !engine::artcnnVideoSr(desc_.videoSrQuality)) return true;
+    // The network is a 2x luma upscaler. Any other extent is not a backend
+    // failure: the plain resize below keeps the frame and the user's SR toggle.
+    if (!ArtCnnBackend::supportedRatio(srcW_, srcH_, workW_, workH_)) {
+        veyra::log::warn("artcnn-sr", std::format("exact 2x ratio required ({}x{} -> {}x{}); falling back to plain resize",
+            srcW_, srcH_, workW_, workH_));
+        return true;
+    }
+    if (desc_.noFeatures) {
+        veyra::log::warn("artcnn-sr", "feature-disabled configuration: ArtCNN super resolution skipped");
+        return true;
+    }
+    const wchar_t* modelName = desc_.videoSrQuality == engine::kVideoSrArtCnnC4F16 ? L"artcnn_c4f16.onnx" : L"artcnn_c4f32.onnx";
+    const auto modelPath = locateSpatialSrModel(modelName);
+    if (modelPath.empty()) {
+        veyra::log::error("artcnn-sr", std::format("ArtCNN weights missing ({}); the engine will disable the SR stage", utf8Of(modelName)));
+        return true;
+    }
+    artcnnSrBackend_ = std::make_unique<ArtCnnBackend>();
+    std::string error;
+    if (!artcnnSrBackend_->initialize(context_.device(), modelPath, srcW_, srcH_, workW_, workH_, desc_.hdrWorking(), error)) {
+        artcnnSrBackend_.reset();
+        veyra::log::error("artcnn-sr", std::format("ArtCNN unavailable: {}", error));
+        return true;
+    }
+    veyra::log::info("artcnn-sr", std::format("quality={} model={} render={}x{} output={}x{} weights={} MiB macs={}",
+        desc_.videoSrQuality, utf8Of(modelPath.filename().wstring()), srcW_, srcH_, workW_, workH_,
+        artcnnSrBackend_->weightBytes() >> 20, artcnnSrBackend_->multiplyAccumulates()));
+    return true;
+}
+
+bool EnhanceGraph::initAmfHqSr()
+{
+    if (!amfHqSrRequested()) return true;
+    if (desc_.noFeatures) {
+        veyra::log::warn("amf-hq-sr", "feature-disabled configuration: AMF HQScaler skipped");
+        return true;
+    }
+    amfHqSrBackend_ = std::make_unique<gfx::AmfHqScalerBackend>();
+    gfx::AmfHqScalerBackend::Config config;
+    // Video SR 1.1 is the newer network. Runtimes that predate it reject the
+    // algorithm in initialize(); Video SR 1.0 is the documented fallback, not a
+    // failure, so the stage stays up on an older driver.
+    config.algorithm = gfx::AmfHqScalerBackend::Algorithm::VideoSr1_1;
+    config.keepAspectRatio = false;
+    config.fromSrgb = false;
+    if (!amfHqSrBackend_->initialize(context_.device(), ring_.queue(), srcW_, srcH_, workW_, workH_,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT, config)) {
+        veyra::log::info("amf-hq-sr", "AMF HQScaler Video SR 1.1 unavailable; falling back to Video SR 1.0");
+        config.algorithm = gfx::AmfHqScalerBackend::Algorithm::VideoSr1_0;
+        if (!amfHqSrBackend_->initialize(context_.device(), ring_.queue(), srcW_, srcH_, workW_, workH_,
+                                         DXGI_FORMAT_R16G16B16A16_FLOAT, config)) {
+            veyra::log::error("amf-hq-sr", std::format("AMF HQScaler unavailable: {}", amfHqSrBackend_->lastError()));
+            amfHqSrBackend_.reset();
+            return true;
+        }
+    }
+    veyra::log::info("amf-hq-sr", std::format("runtime={} render={}x{} output={}x{} algorithm={}",
+        amfHqSrBackend_->runtimeVersion(), srcW_, srcH_, workW_, workH_,
+        config.algorithm == gfx::AmfHqScalerBackend::Algorithm::VideoSr1_1 ? "VideoSR1.1" : "VideoSR1.0"));
+    return true;
+}
+
+bool EnhanceGraph::initAmfVqSr()
+{
+    if (!amfVqSrRequested()) return true;
+    if (desc_.noFeatures) {
+        veyra::log::warn("amf-vq-sr", "feature-disabled configuration: AMF VQ enhancer skipped");
+        return true;
+    }
+    amfVqSrBackend_ = std::make_unique<gfx::AmfVqEnhancerBackend>();
+    // The component enhances at the size it is initialized with, so it always
+    // runs at the work extent: 1x is its normal case, and an ordinary resize
+    // into workRgba_ happens before it when the source is smaller.
+    const gfx::AmfVqEnhancerBackend::Config config{};
+    if (!amfVqSrBackend_->initialize(context_.device(), ring_.queue(), workW_, workH_,
+                                     DXGI_FORMAT_R16G16B16A16_FLOAT, config)) {
+        veyra::log::error("amf-vq-sr", std::format("AMF VQ enhancer unavailable: {}", amfVqSrBackend_->lastError()));
+        amfVqSrBackend_.reset();
+        return true;
+    }
+    veyra::log::info("amf-vq-sr", std::format("runtime={} extent={}x{} attenuation={} radius={}",
+        amfVqSrBackend_->runtimeVersion(), workW_, workH_, config.fcrAttenuation, config.fcrRadius));
+    return true;
+}
+
+bool EnhanceGraph::initOrtDmlSr()
+{
+    if (!ortDmlSrRequested()) return true;
+    if (desc_.noFeatures) {
+        veyra::log::warn("dml-sr", "feature-disabled configuration: DirectML super resolution skipped");
+        return true;
+    }
+    const auto runtimeDllPath = locateOrtDmlRuntimeDll();
+    if (runtimeDllPath.empty()) {
+        veyra::log::error("dml-sr", "ONNX Runtime for DirectML missing: put onnxruntime.dll in models/onnxruntime or point VEYRA_ONNXRUNTIME_DIR at its absolute directory; the engine will disable the SR stage");
+        return true;
+    }
+    const wchar_t* modelName = desc_.videoSrQuality == engine::kVideoSrDmlSpan ? L"span.onnx" : L"realplksr.onnx";
+    const auto modelPath = locateSpatialSrModel(modelName);
+    if (modelPath.empty()) {
+        veyra::log::error("dml-sr", std::format("DirectML SR weights missing ({}); the engine will disable the SR stage", utf8Of(modelName)));
+        return true;
+    }
+    OrtDmlSrBackend::Config config;
+    config.runtimeDllPath = runtimeDllPath;
+    config.modelPath = modelPath;
+    config.hdrWorking = desc_.hdrWorking();
+    ortDmlSrBackend_ = std::make_unique<OrtDmlSrBackend>();
+    if (!ortDmlSrBackend_->open(config, context_.device(), ring_.queue()) ||
+        !ortDmlSrBackend_->prepare(srcW_, srcH_, workW_, workH_)) {
+        veyra::log::error("dml-sr", std::format("DirectML SR unavailable: {}", ortDmlSrBackend_->error()));
+        ortDmlSrBackend_->shutdown();
+        ortDmlSrBackend_.reset();
+        return true;
+    }
+    if (!ortDmlSrBackend_->warning().empty())
+        veyra::log::warn("dml-sr", ortDmlSrBackend_->warning());
+    veyra::log::info("dml-sr", std::format("quality={} model={} runtime={} render={}x{} output={}x{} in={} out={} fallback={}",
+        desc_.videoSrQuality, utf8Of(modelPath.filename().wstring()), ortDmlSrBackend_->runtimeVersion(),
+        srcW_, srcH_, workW_, workH_, ortDmlSrBackend_->inputName(), ortDmlSrBackend_->outputName(),
+        ortDmlSrBackend_->usesFallback() ? 1 : 0));
+    return true;
+}
+
+ID3D12Resource* EnhanceGraph::prepareFsrReactiveMask(
+    ID3D12GraphicsCommandList* list, UINT passIndex, ID3D12Resource* currColor, ID3D12Resource* motionTex,
+    ID3D12Resource* reactive, ID3D12Resource* const prev[2], uint32_t& prevSlot, bool& prevValid,
+    uint32_t width, uint32_t height, bool validMotion, bool reset)
+{
+    if(!desc_.fsrSrReactiveMask||!fsrReactiveMaskPass_.heap||!currColor||!reactive||!prev[0]||!prev[1]||width==0||height==0)
+        return nullptr;
+    const uint32_t slot=prevSlot&1u;
+    const uint32_t nextSlot=1u-slot;
+    const bool hasHistory=!reset&&prevValid;
+    tracker_.transition(list,currColor,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    tracker_.transition(list,prev[slot],D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    if(motionTex)tracker_.transition(list,motionTex,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    tracker_.transition(list,reactive,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    tracker_.transition(list,prev[nextSlot],D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    const float c[8]={uintBits(width),uintBits(height),0.75f,uintBits(hasHistory?1u:0u),uintBits(validMotion?1u:0u),0.0f,0.0f,0.0f};
+    const UINT base=passIndex*10u;
+    fsrReactiveMaskPass_.bind(list,c,gpuHandleOf(fsrReactiveMaskPass_,base+slot*3u).ptr,gpuHandleOf(fsrReactiveMaskPass_,base+6u+slot*2u).ptr);
+    list->Dispatch((width+7u)/8u,(height+7u)/8u,1u);
+    tracker_.uavBarrier(list,reactive);
+    tracker_.uavBarrier(list,prev[nextSlot]);
+    tracker_.transition(list,reactive,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    tracker_.transition(list,prev[nextSlot],D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    prevSlot=nextSlot;
+    prevValid=true;
+    return reactive;
 }
 
 bool EnhanceGraph::fsrActive() const { return fsrFgBackend_&&fsrFgBackend_->available(); }
@@ -1583,8 +1864,13 @@ bool EnhanceGraph::initAmfFrc()
     if(desc_.fgMultiplier!=2){veyra::log::error("amf-frc","AMD FRC generates one frame per pair (2X only)");return false;}
     // APUs (little dedicated memory) take the downscaled motion search AMD suggests for them.
     const bool lowPower=context_.adapter().dedicatedVideoMemoryBytes<(uint64_t(2)<<30);
+    gfx::AmfFrcBackend::Config cfg{};
+    cfg.lowPower=lowPower;
+    cfg.profile=static_cast<gfx::AmfFrcBackend::Profile>(std::min<uint32_t>(desc_.amfFrcProfile,engine::kAmfFrcProfileCount-1));
+    cfg.mvSearchMode=static_cast<gfx::AmfFrcBackend::MvSearchMode>(std::min<uint32_t>(desc_.amfFrcMvSearch,engine::kAmfFrcMvSearchCount-1));
+    cfg.useFutureFrame=desc_.amfFrcUseFutureFrame;
     amfFrc_=std::make_unique<gfx::AmfFrcBackend>();
-    if(!amfFrc_->initialize(context_.device(),ring_.queue(),workW_,workH_,outputFormat(),lowPower))return false;
+    if(!amfFrc_->initialize(context_.device(),ring_.queue(),workW_,workH_,outputFormat(),cfg))return false;
     fgCapsAvailable_=true;fgMultiFrameMax_=1;
     failedBackend_=engine::FailedBackend::None;
     return true;
@@ -1832,16 +2118,27 @@ bool EnhanceGraph::initNgxFeatures()
                 // restores its delta over the untouched HDR base before the
                 // same shared residual/protection/temporal composite.
                 if(desc_.hdrWorking()&&!instance->createAmdHdrProxy(context_.device()))return false;
-                if(amdNrProvider(context_.adapter().vendorId,context_.adapter().description)==AmdNrProvider::RedDukeRdna3){
-                    auto backend=std::make_unique<Rdna3NrBackend>();
-                    const auto directory=std::filesystem::path(desc_.runtimeAbsPath)/L".."/L"amd-nr-rdna3";
-                    if(!backend->open(directory.lexically_normal(),context_.device(),ring_.queue(),extent.width,extent.height,instance->model.performance))return false;
-                    instance->amd=std::move(backend);
-                }else{
-                    auto backend=std::make_unique<LmxxfNrBackend>();
-                    const auto directory=std::filesystem::path(desc_.runtimeAbsPath)/L".."/L"amd-nr";
-                    if(!backend->open(directory.lexically_normal(),context_.device(),ring_.queue(),context_.adapter().vendorId,instance->model.performance))return false;
-                    instance->amd=std::move(backend);
+                // Every AMD NR line opens through the factory, so the probe order,
+                // the RX 7000 ZLUDA worker and the per-line error text stay in one
+                // place and the graph never names a concrete backend.
+                AmdNrOpenRequest request{};
+                request.runtimeAbsPath=std::filesystem::path(desc_.runtimeAbsPath);
+                request.device=context_.device();
+                request.queue=ring_.queue();
+                request.vendor=context_.adapter().vendorId;
+                request.adapterDescription=context_.adapter().description;
+                request.width=extent.width;
+                request.height=extent.height;
+                request.style=instance->model.style;
+                request.uiCorrection=instance->model.uiCorrection;
+                request.performance=instance->model.performance;
+                request.zeroMotion=instance->zeroMotion();
+                request.zeroDepth=instance->zeroDepth();
+                std::string openError;
+                instance->amd=openAmdNrBackend(request,openError);
+                if(!instance->amd){
+                    veyra::log::error("amd-nr",std::format("NR layer {} backend open failed: {}",index+1,openError));
+                    return false;
                 }
                 if(!instance->amd->admits(extent.width,extent.height))return false;
             }
@@ -2215,6 +2512,16 @@ bool EnhanceGraph::createComputePasses()
     }
     // Sets: 0 source flow, 1 NR, 2 work, 3.. NR layers, then the double SR pass motions.
     if(!flowAdaptPass_.loadShader("FlowAdapt.dxil",cs)||!flowAdaptPass_.create(context_.device(),cs,dlaaFlowSet(UINT(dlaa_.size())),1,1))return false;
+    if(fsrSrEnabled()&&desc_.fsrSrReactiveMask){
+        const UINT passCount=desc_.firstSrRuns(engine::kVideoSrFsr)?2u:1u;
+        if(!fsrReactiveMaskPass_.loadShader("FsrReactiveMask.dxil",cs)||
+           !fsrReactiveMaskPass_.create(context_.device(),cs,passCount*10u,3,2)){
+            veyra::log::warn("fsr-sr","FsrReactiveMask.dxil unavailable; running FSR SR without reactive mask");
+            fsrReactiveMaskPass_={};
+            fsrSrReactive_.Reset();fsrSrPrevColor_[0].Reset();fsrSrPrevColor_[1].Reset();
+            firstFsrSrReactive_.Reset();firstFsrSrPrevColor_[0].Reset();firstFsrSrPrevColor_[1].Reset();
+        }
+    }
     if(flowRefine_){
         if(!fgFlowAdaptPass_.create(context_.device(),cs,2,1,1))return false;
         if(!flowRefinePass_.loadShader("FlowRefine.dxil",cs)||!flowRefinePass_.create(context_.device(),cs,6,5,1))return false;
@@ -2412,6 +2719,30 @@ bool EnhanceGraph::createViews()
         makeUav(context_.device(),nrInstances_[i]->motion(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,3+UINT(i)));
     if(firstSrFlow_)makeUav(context_.device(),firstSrFlow_.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,firstSrFlowSet()));
     if(secondSrFlow_)makeUav(context_.device(),secondSrFlow_.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,secondSrFlowSet()));
+    if(fsrReactiveMaskPass_.heap){
+        auto bindReactive=[&](UINT passIndex,ID3D12Resource* currColor,ID3D12Resource* motion,
+                              ID3D12Resource* reactive,ID3D12Resource* const prev[2]){
+            const UINT base=passIndex*10u;
+            for(UINT slot=0;slot<2u;++slot){
+                stagedSrv(currColor,DXGI_FORMAT_R16G16B16A16_FLOAT,fsrReactiveMaskPass_,base+slot*3u+0u);
+                stagedSrv(prev[slot],DXGI_FORMAT_R16G16B16A16_FLOAT,fsrReactiveMaskPass_,base+slot*3u+1u);
+                stagedSrv(motion,DXGI_FORMAT_R16G16_FLOAT,fsrReactiveMaskPass_,base+slot*3u+2u);
+                makeUav(context_.device(),reactive,DXGI_FORMAT_R8_UNORM,cpu(fsrReactiveMaskPass_,base+6u+slot*2u+0u));
+                makeUav(context_.device(),prev[1u-slot],DXGI_FORMAT_R16G16B16A16_FLOAT,cpu(fsrReactiveMaskPass_,base+6u+slot*2u+1u));
+            }
+        };
+        if(fsrSrBackend_&&fsrSrReactive_){
+            ID3D12Resource* const prev[2]={fsrSrPrevColor_[0].Get(),fsrSrPrevColor_[1].Get()};
+            auto* curr=desc_.dualSr?srPrescaled_.Get():srStageInput();
+            auto* motion=desc_.dualSr?secondSrFlow_.Get():(firstSrFlow_?firstSrFlow_.Get():flowTex_.Get());
+            bindReactive(0u,curr,motion,fsrSrReactive_.Get(),prev);
+        }
+        if(firstFsrSrBackend_&&firstFsrSrReactive_){
+            ID3D12Resource* const prev[2]={firstFsrSrPrevColor_[0].Get(),firstFsrSrPrevColor_[1].Get()};
+            auto* motion=firstSrFlow_?firstSrFlow_.Get():flowTex_.Get();
+            bindReactive(1u,srStageInput(),motion,firstFsrSrReactive_.Get(),prev);
+        }
+    }
     for(UINT i=0;i<dlaa_.size();++i)if(dlaa_[i].adaptedMotion)
         makeUav(context_.device(),dlaa_[i].adaptedMotion.Get(),DXGI_FORMAT_R16G16_FLOAT,cpu(flowAdaptPass_,dlaaFlowSet(i)));
     if(flowRefine_){
@@ -2929,7 +3260,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         out.detectedReset=ResetReason::PtsDiscontinuity;
         reset=true;veyra::log::info("timeline","non-monotonic or discontinuous PTS; atomic history reset");
     }
-    if (reset) { prevValid_ = false; scene_.reset(); sceneLastSourceId_=0; previousLuma_.clear();cadence_.reset(); }
+    if (reset) { prevValid_ = false; fsrSrPrevValid_ = false; firstFsrSrPrevValid_ = false; scene_.reset(); sceneLastSourceId_=0; previousLuma_.clear();cadence_.reset(); }
 
     const uint32_t parity = static_cast<uint32_t>(realFrameIndex_ % 2);
     if(!realLeases_[parity].expired()||!generatedLeases_[parity].expired()){
@@ -2994,7 +3325,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         const auto analysis=scene_.analyze(realFrameIndex_,hist,sad,static_cast<uint64_t>(std::max(0.0,ptsMs)*1000),sourceStep);
         if(analysis.isSceneCut||analysis.isCadenceBreak){
             if(out.detectedReset==ResetReason::None)out.detectedReset=analysis.isSceneCut?ResetReason::SceneCut:ResetReason::CadenceBreak;
-            reset=true;prevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;
+            reset=true;prevValid_=false;fsrSrPrevValid_=false;firstFsrSrPrevValid_=false;if(analysis.isSceneCut)++metrics_.sceneCutCount;
             veyra::log::info("scene",std::format("history boundary frame={} ptsMs={} cutCandidate={} cadenceBreak={} sad={} histogramDistance={}",
                 realFrameIndex_,ptsMs,analysis.isSceneCut,analysis.isCadenceBreak,analysis.sadScore,analysis.histogramDistance));
         }
@@ -3592,9 +3923,14 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             list->Dispatch((w+15)/16,(h+15)/16,1);tracker_.uavBarrier(list,output);tracker_.transition(list,output,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         };
         adapt(nrFlow_.Get(),nrW_,nrH_,1);adapt(baseFlow_.Get(),workW_,workH_,2);
-        // Double SR temporal passes: a first DLSS SR pass in first-result pixels,
-        // a second FSR pass in SR-input (render) pixels.
-        if(firstSrFlow_)adapt(firstSrFlow_.Get(),desc_.firstSrWidth,desc_.firstSrHeight,firstSrFlowSet());
+        // Double SR temporal passes: a first DLSS SR pass in first-result pixels
+        // (or FSR first/single pass adapted from half-res flow to source pixels),
+        // and a second FSR pass in SR-input (render) pixels.
+        if(firstSrFlow_){
+            const uint32_t fw=desc_.firstSrRuns(0)?desc_.firstSrWidth:srcW_;
+            const uint32_t fh=desc_.firstSrRuns(0)?desc_.firstSrHeight:srcH_;
+            adapt(firstSrFlow_.Get(),fw,fh,firstSrFlowSet());
+        }
         if(secondSrFlow_)adapt(secondSrFlow_.Get(),srInW_,srInH_,secondSrFlowSet());
         for(UINT i=0;i<dlaa_.size();++i){
             const auto& d=dlaa_[i];
@@ -3667,18 +4003,30 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             if(!backend.evaluate(list,ngxParams_,ed,st)){failedBackend_=engine::FailedBackend::Sr;veyra::log::error("dual-sr","DLSS SR evaluate failed");return false;}
             finishTemporalOutput(list,restore,output);return true;
         };
-        auto fsr=[&](gfx::FsrSrBackend& backend,ID3D12Resource* color,ID3D12Resource* motion,ID3D12Resource* output,uint32_t inW,uint32_t inH,uint32_t outW,uint32_t outH)->bool{
+        auto fsr=[&](gfx::FsrSrBackend& backend,ID3D12Resource* color,ID3D12Resource* motion,ID3D12Resource* reactiveMotion,ID3D12Resource* output,uint32_t inW,uint32_t inH,uint32_t outW,uint32_t outH)->bool{
             const bool first=output==firstSrLinear_.Get();
             auto& restore=first?firstSrHdrRestore_:srHdrRestore_;
             auto* target=restore.raw?restore.raw.Get():output;
+            ID3D12Resource* reactive=nullptr;
+            if(first){
+                ID3D12Resource* const prev[2]={firstFsrSrPrevColor_[0].Get(),firstFsrSrPrevColor_[1].Get()};
+                reactive=prepareFsrReactiveMask(list,1u,color,reactiveMotion,firstFsrSrReactive_.Get(),prev,
+                    firstFsrSrPrevSlot_,firstFsrSrPrevValid_,inW,inH,validMotion,fsrReset);
+            }else{
+                ID3D12Resource* const prev[2]={fsrSrPrevColor_[0].Get(),fsrSrPrevColor_[1].Get()};
+                reactive=prepareFsrReactiveMask(list,0u,color,reactiveMotion,fsrSrReactive_.Get(),prev,
+                    fsrSrPrevSlot_,fsrSrPrevValid_,inW,inH,validMotion,fsrReset);
+            }
             readable({color,motion,fsrSrDepth_.Get()});tracker_.transition(list,target,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            if(!backend.evaluate(list,color,motion,fsrSrDepth_.Get(),target,inW,inH,outW,outH,fsrReset,float(deltaMs))){
+            if(!backend.evaluate(list,color,motion,fsrSrDepth_.Get(),target,inW,inH,outW,outH,fsrReset,float(deltaMs),
+                                 reactive,desc_.fsrSrSharpening,desc_.fsrSrSharpness)){
                 failedBackend_=engine::FailedBackend::Sr;veyra::log::error("dual-sr","FSR evaluate failed");return false;
             }
             finishTemporalOutput(list,restore,output);
             return true;
         };
         auto* zero=fsrSrZeroMotion_.Get();
+        auto* firstFsrFlow=firstSrFlow_?firstSrFlow_.Get():flowTex_.Get();
         // 1. Source -> linear first result.
         if(engine::rtxVideoSr(desc_.videoSrQuality)){if(!firstVideoSr())return false;}
         else{
@@ -3692,7 +4040,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             }else if(firstDlssSrBackend_){
                 if(!dlss(*firstDlssSrBackend_,input,validMotion?firstSrFlow_.Get():zero,firstSrLinear_.Get()))return false;
             }else if(firstFsrSrBackend_&&firstFsrSrBackend_->created()){
-                if(!fsr(*firstFsrSrBackend_,input,validMotion?flowTex_.Get():zero,firstSrLinear_.Get(),srcW_,srcH_,desc_.firstSrWidth,desc_.firstSrHeight))return false;
+                if(!fsr(*firstFsrSrBackend_,input,validMotion?firstFsrFlow:zero,firstFsrFlow,firstSrLinear_.Get(),srcW_,srcH_,desc_.firstSrWidth,desc_.firstSrHeight))return false;
             }else{failedBackend_=engine::FailedBackend::Sr;veyra::log::error("dual-sr","first SR pass has no backend");return false;}
             ++metrics_.srEvaluateCount;
         }
@@ -3704,7 +4052,7 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
             if(desc_.dualSrQuality==0&&srBackend_&&srBackend_->created()){
                 if(!dlss(*srBackend_,srPrescaled_.Get(),validMotion?baseFlow_.Get():zero,workRgba_.Get()))return false;
             }else if(desc_.dualSrQuality==engine::kVideoSrFsr&&fsrSrBackend_&&fsrSrBackend_->created()){
-                if(!fsr(*fsrSrBackend_,srPrescaled_.Get(),validMotion?secondSrFlow_.Get():zero,workRgba_.Get(),srInW_,srInH_,workW_,workH_))return false;
+                if(!fsr(*fsrSrBackend_,srPrescaled_.Get(),validMotion?secondSrFlow_.Get():zero,secondSrFlow_.Get(),workRgba_.Get(),srInW_,srInH_,workW_,workH_))return false;
             }else{failedBackend_=engine::FailedBackend::Sr;veyra::log::error("dual-sr","second SR pass has no backend");return false;}
             ++metrics_.srEvaluateCount;
         }
@@ -3738,15 +4086,21 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         // The shared boundary includes ordinary NR-first output as well as
         // split-node/color output. Reading srcRgba_ here discards completed NR.
         auto* srInput=srStageInput();
-        tracker_.transition(list,srInput,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         const bool validMotion=desc_.srUsesFlow()&&haveFlow;
-        auto* srMotion=validMotion?flowTex_.Get():fsrSrZeroMotion_.Get();
+        const bool fsrReset=reset||(desc_.srUsesFlow()&&!haveFlow);
+        auto* adaptedFlow=firstSrFlow_?firstSrFlow_.Get():flowTex_.Get();
+        auto* srMotion=validMotion?adaptedFlow:fsrSrZeroMotion_.Get();
+        ID3D12Resource* const prev[2]={fsrSrPrevColor_[0].Get(),fsrSrPrevColor_[1].Get()};
+        auto* reactive=prepareFsrReactiveMask(list,0u,srInput,adaptedFlow,fsrSrReactive_.Get(),prev,
+            fsrSrPrevSlot_,fsrSrPrevValid_,srcW_,srcH_,validMotion,fsrReset);
+        tracker_.transition(list,srInput,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list,srMotion,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list,fsrSrDepth_.Get(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         auto* fsrTarget=srHdrRestore_.raw?srHdrRestore_.raw.Get():workRgba_.Get();
         tracker_.transition(list,fsrTarget,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         if(!fsrSrBackend_->evaluate(list,srInput,srMotion,fsrSrDepth_.Get(),fsrTarget,
-                                    srcW_,srcH_,workW_,workH_,reset||(desc_.srUsesFlow()&&!haveFlow),float(deltaMs))){
+                                    srcW_,srcH_,workW_,workH_,fsrReset,float(deltaMs),
+                                    reactive,desc_.fsrSrSharpening,desc_.fsrSrSharpness)){
             failedBackend_=engine::FailedBackend::Sr;
             return false;
         }
@@ -3774,6 +4128,95 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
         }
         ++metrics_.srEvaluateCount;gpuTimer_.mark(list,GpuStage::Sr,true);
         finishTemporalOutput(list,srHdrRestore_,workRgba_.Get());
+    } else if(!mixed && srEnabled_ && artcnnSrEnabled()) {
+        // ArtCNN: one list, no split submit and no CPU wait. The backend uploads
+        // its weights inside this list on the first frame and latches itself
+        // false if a pass fails, so a bad launch is reported once.
+        gpuTimer_.mark(list,GpuStage::Sr);
+        auto* srInput = srStageInput();
+        tracker_.transition(list, srInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if (!artcnnSrBackend_->run(list, tracker_, srInput, workRgba_.Get())) {
+            failedBackend_ = engine::FailedBackend::Sr;
+            return false;
+        }
+        tracker_.uavBarrier(list, workRgba_.Get());
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ++metrics_.srEvaluateCount;
+        gpuTimer_.mark(list, GpuStage::Sr, true);
+    } else if (!mixed && srEnabled_ && amfHqSrEnabled()) {
+        // AMF HQScaler: capture -> submit -> process -> copyOutput. AMF runs on
+        // its own queue and holds the surface until submitted(), so the capture
+        // list is submitted before process() and the copy list before the
+        // surface is handed back. No CPU fence wait is added here; the shared
+        // DMA queue orders the two lists.
+        gpuTimer_.mark(list, GpuStage::Sr);
+        auto* srInput = srStageInput();
+        tracker_.transition(list, srInput, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        if (!amfHqSrBackend_->capture(list, srInput)) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        tracker_.transition(list, srInput, D3D12_RESOURCE_STATE_COMMON);
+        if (!submitGraph(slot)) return false;
+        if (!amfHqSrBackend_->process(reset)) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        list = ring_.acquireNext(slot, st); if (!list) return false;
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+        if (!amfHqSrBackend_->copyOutput(list, workRgba_.Get())) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ++metrics_.srEvaluateCount;
+        gpuTimer_.mark(list, GpuStage::Sr, true);
+        if (!submitGraph(slot)) return false;
+        amfHqSrBackend_->submitted();
+        list = ring_.acquireNext(slot, st); if (!list) return false;
+    } else if (!mixed && srEnabled_ && amfVqSrEnabled()) {
+        // AMF VQ enhancer: a same-size stage. At 1x the source is the target and
+        // capture() copies it into AMF's own surface; when the source is smaller
+        // the ordinary resize into workRgba_ runs first and the enhancer then
+        // reads and rewrites that working texture.
+        gpuTimer_.mark(list, GpuStage::Sr);
+        ID3D12Resource* vqInput = srStageInput();
+        if (srcW_ != workW_ || srcH_ != workH_) {
+            tracker_.transition(list, vqInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            const float constants[8] = {
+                uintBits(srcW_), uintBits(srcH_),
+                uintBits(workW_), uintBits(workH_), 0, 0, 0, 0 };
+            blitPass_.bind(list, constants, gpuHandleOf(blitPass_, 18).ptr, gpuHandleOf(blitPass_, 1).ptr);
+            list->Dispatch((workW_ + 15) / 16, (workH_ + 15) / 16, 1);
+            tracker_.uavBarrier(list, workRgba_.Get());
+            vqInput = workRgba_.Get();
+        }
+        tracker_.transition(list, vqInput, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        if (!amfVqSrBackend_->capture(list, vqInput)) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        tracker_.transition(list, vqInput, D3D12_RESOURCE_STATE_COMMON);
+        if (!submitGraph(slot)) return false;
+        if (!amfVqSrBackend_->process(reset)) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        list = ring_.acquireNext(slot, st); if (!list) return false;
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+        if (!amfVqSrBackend_->copyOutput(list, workRgba_.Get())) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ++metrics_.srEvaluateCount;
+        gpuTimer_.mark(list, GpuStage::Sr, true);
+        if (!submitGraph(slot)) return false;
+        amfVqSrBackend_->submitted();
+        list = ring_.acquireNext(slot, st); if (!list) return false;
+    } else if (!mixed && srEnabled_ && ortDmlSrEnabled()) {
+        // ONNX Runtime + DirectML: preprocess into the bound NCHW buffer, run the
+        // session on the queue, postprocess into the working texture. The source
+        // stays resident for the chroma carry-through of luma-only models, so it
+        // is only a read on both lists.
+        gpuTimer_.mark(list, GpuStage::Sr);
+        auto* srInput = srStageInput();
+        tracker_.transition(list, srInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        if (!ortDmlSrBackend_->recordPreprocess(list, srInput)) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        if (!submitGraph(slot)) return false;
+        if (!ortDmlSrBackend_->run()) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        list = ring_.acquireNext(slot, st); if (!list) return false;
+        tracker_.transition(list, srInput, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if (!ortDmlSrBackend_->recordPostprocess(list, workRgba_.Get(), srInput)) { failedBackend_ = engine::FailedBackend::Sr; return false; }
+        tracker_.uavBarrier(list, workRgba_.Get());
+        tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        ++metrics_.srEvaluateCount;
+        gpuTimer_.mark(list, GpuStage::Sr, true);
     } else if(workRgba_.Get()!=srcRgba_.Get()) {
         tracker_.transition(list,srStageInput(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         tracker_.transition(list, workRgba_.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -3939,6 +4382,13 @@ bool EnhanceGraph::process(const AVFrame* frame, double ptsMs, bool reset, Frame
                     list->Dispatch((nrW+15)/16,(nrH+15)/16,1);
                     tracker_.uavBarrier(list,layer->amdHdrProxy());
                     tracker_.transition(list,layer->amdHdrProxy(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
+                // dlssnr_core samples the graph's shared zeroed motion/depth guidance, so those
+                // are published as shader resources first; the ZLUDA/HIP lines ignore them.
+                if(layer->amd->needsGuidance()){
+                    tracker_.transition(list,hdr?layer->amdHdrProxy():layer->input(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    tracker_.transition(list,layer->zeroMotion(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    tracker_.transition(list,layer->zeroDepth(),D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 }
                 if(!layer->amd->recordInputs(list,hdr?layer->amdHdrProxy():layer->input(),realFrameIndex_+1,reset||!layer->historyValid||layer->inputRevision!=1,layer->model.intensity))return false;
                 // Same direct queue, producer -> HIP handoff -> consumer. No
@@ -4529,9 +4979,11 @@ bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
     // rebuild instead of accepting a change that cannot take effect in place.
     if((desc_.enableNr&&s.nrRuntime!=desc_.nrRuntime)||
        (desc_.enableFg&&(std::max(2u,s.multiplier)!=desc_.fgMultiplier||s.frameGenerationBackend!=desc_.frameGenerationBackend||
-        (desc_.frameGenerationBackend==engine::FrameGenerationBackend::Vfg&&(s.vfgQuality!=desc_.vfgQuality||s.vfgAutoRegulate!=desc_.vfgAutoRegulate))))||
+        (desc_.frameGenerationBackend==engine::FrameGenerationBackend::Vfg&&(s.vfgQuality!=desc_.vfgQuality||s.vfgAutoRegulate!=desc_.vfgAutoRegulate))||
+        (desc_.frameGenerationBackend==engine::FrameGenerationBackend::AmdFrc&&(s.amfFrcProfile!=desc_.amfFrcProfile||s.amfFrcMvSearch!=desc_.amfFrcMvSearch||s.amfFrcUseFutureFrame!=desc_.amfFrcUseFutureFrame))))||
        (desc_.enableSr&&(s.videoSrQuality!=desc_.videoSrQuality||
-         ((desc_.videoSrQuality==0||(desc_.dualSr&&desc_.dualSrQuality==0))&&s.dlssSrModel!=desc_.dlssSrModel)))||
+         ((desc_.videoSrQuality==0||(desc_.dualSr&&desc_.dualSrQuality==0))&&s.dlssSrModel!=desc_.dlssSrModel)||
+         (fsrSrRequested()&&(s.fsrSrVersionMode!=desc_.fsrSrVersionMode||s.fsrSrReactiveMask!=desc_.fsrSrReactiveMask))))||
        (dlaaRequested()&&s.dlssSrModel!=desc_.dlssSrModel)||
        (s.multiplier>1&&s.frameGenerationBackend==engine::FrameGenerationBackend::Dlss&&(!fgCapsAvailable_||s.multiplier-1>uint32_t(fgMultiFrameMax_))))return false;
     // The colour master switch changes the graph shape (tables + shader branch)
@@ -4607,6 +5059,7 @@ bool EnhanceGraph::applySettings(const engine::EnhancementSettings& s){
     if(faceTracker_)faceTracker_->configure(desc_.beautyDetection,beautyMinConfidence());
     desc_.contentRate=s.content;desc_.model=s.model;desc_.residual=s.residual;desc_.protection=s.protection;desc_.exclusion=s.exclusion;desc_.settingsRevision=s.revision;
     desc_.nrHoldStrength=s.nrHoldStrength;desc_.nrHoldTolerance=s.nrHoldTolerance;
+    desc_.fsrSrSharpening=s.fsrSrSharpening;desc_.fsrSrSharpness=s.fsrSrSharpness;
     if(desc_.nrReusePreview&&s.nr){
         const auto previousReuse=desc_.nrReuse;desc_.nrReuse=s.nrReuse;
         if(nrReusePass_&&desc_.nrReuse!=previousReuse){
@@ -4754,6 +5207,14 @@ void EnhanceGraph::shutdown()
     fsrFgBackend_.reset();
     vfgBackend_.reset();
     amfFrc_.reset();
+    // Phase-1 spatial SR backends, released back-to-front of creation. Each one
+    // owns D3D12 resources (and, for AMF, a component instance holding surfaces
+    // on the shared queue), so it is torn down after the ring has been drained
+    // and before the device goes away.
+    if(ortDmlSrBackend_){ortDmlSrBackend_->shutdown();ortDmlSrBackend_.reset();}
+    if(amfVqSrBackend_){amfVqSrBackend_->shutdown();amfVqSrBackend_.reset();}
+    if(amfHqSrBackend_){amfHqSrBackend_->shutdown();amfHqSrBackend_.reset();}
+    if(artcnnSrBackend_){artcnnSrBackend_->shutdown();artcnnSrBackend_.reset();}
     if (fgBackend_) featuresReleased=fgBackend_->release()&&featuresReleased;
     if(firstVideoSrBackend_){featuresReleased=firstVideoSrBackend_->release()&&featuresReleased;firstVideoSrBackend_.reset();}
     if(videoSrBackend_){featuresReleased=videoSrBackend_->release()&&featuresReleased;videoSrBackend_.reset();}
@@ -4845,7 +5306,7 @@ void EnhanceGraph::shutdown()
     amdHdrEncodePass_ = {};amdHdrRestorePass_ = {};
     rgbPass_={};rgbTex_.Reset();
     for(unsigned i=0;i<2;++i){if(upRgb_[i]&&mappedRgb_[i])upRgb_[i]->Unmap(0,nullptr);mappedRgb_[i]=nullptr;upRgb_[i].Reset();}
-    downsamplePass_={};residualPass_={};stackProtectionPass_={};flowAdaptPass_={};
+    downsamplePass_={};residualPass_={};stackProtectionPass_={};flowAdaptPass_={};fsrReactiveMaskPass_={};
     for(auto& layer:nrInstances_)layer->close();
     nrInstances_.clear();
     for(auto& layer:nrAutoPool_)layer.reset();nrAutoLevel_=0;nrAutoPoolReady_=nrAutoResetPending_=false;
@@ -4901,6 +5362,9 @@ void EnhanceGraph::shutdown()
     for(auto& r:sourceReferences_)r.Reset();for(auto& r:baseReferences_)r.Reset();workRgba_.Reset();
     preGradeRgba_.Reset();srcRgba_.Reset();videoSrInput_.Reset();videoSrOutput_.Reset();srPrescaled_.Reset();
     firstSrInput_.Reset();firstSrOutput_.Reset();firstSrLinear_.Reset();firstSrFlow_.Reset();secondSrFlow_.Reset();fsrAuxW_=fsrAuxH_=0;
+    fsrSrReactive_.Reset();fsrSrPrevColor_[0].Reset();fsrSrPrevColor_[1].Reset();
+    firstFsrSrReactive_.Reset();firstFsrSrPrevColor_[0].Reset();firstFsrSrPrevColor_[1].Reset();
+    fsrSrPrevSlot_=firstFsrSrPrevSlot_=0;fsrSrPrevValid_=firstFsrSrPrevValid_=false;
     nrHoldPass_.reset();
     nrReusePass_.reset();
     colorDetail_.close();

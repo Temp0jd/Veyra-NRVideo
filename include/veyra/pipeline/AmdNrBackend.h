@@ -14,6 +14,9 @@ public:
     virtual bool enqueue()=0;
     virtual bool recordOutputs(ID3D12GraphicsCommandList*,ID3D12Resource*)=0;
     virtual bool retireSubmitted()=0;
+    // True when recordInputs reads the graph's zeroed motion/depth guidance textures, so the
+    // graph must publish them in NON_PIXEL_SHADER_RESOURCE before the call.
+    virtual bool needsGuidance()const{return false;}
     virtual const std::string& error()const=0;
 };
 }

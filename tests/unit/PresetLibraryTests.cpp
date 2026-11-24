@@ -1480,6 +1480,164 @@ __declspec(noinline) void testAutomaticMultiplierCompatibility() {
     entry.chain=session->configurations[1].chain;entry.nodeConfiguration=session->configurations[1];
     check(library.put(entry),"auto FG: preset with editor v17 serializes");
 }
+// M1-M3 options (2026-11-24): the FSR SR version mode / reactive mask / RCAS and
+// the AMF FRC profile / motion search / future frame travel with the global
+// settings as library v23 and session v18 in their own .ai-options files, so a
+// build without them keeps reading and writing the older files unchanged.
+__declspec(noinline) void testAiOptionsStorage() {
+    EnhancementSettings ai=sample();
+    ai.sr=true;ai.videoSrQuality=kVideoSrFsr;
+    ai.fsrSrVersionMode=2;ai.fsrSrReactiveMask=false;ai.fsrSrSharpening=true;ai.fsrSrSharpness=0.8f;
+    ai.multiplier=2;ai.frameGenerationBackend=FrameGenerationBackend::AmdFrc;
+    ai.amfFrcProfile=3;ai.amfFrcMvSearch=2;ai.amfFrcUseFutureFrame=true;
+    check(ai.validate().empty(),"M1-M3 library: the option values validate");
+    const auto path=scratch(L"ai-options-library.v1");
+    for(const auto* suffix:{L".ai-options",L".auto-fg",L".output-controls",L".dual-sr",L".sr-stage",L".field-render"})
+        std::filesystem::remove(std::filesystem::path(path).concat(suffix));
+    PresetLibrary writer(path);writer.setIncludeBuiltins(false);
+    auto e=std::make_unique<PresetEntry>();e->name=L"base";e->kind=ChainMode::List;
+    e->contents=presetContentMask(PresetContent::Chain);e->chain=toChain(sample());e->globals=ChainGlobalSettings::capture(sample());
+    check(writer.load()&&writer.put(*e),"M1-M3 library: save an ordinary library");
+    const auto original=readBytes(path);
+    check(!original.starts_with("VEYRA_PRESET_LIBRARY 23"),"M1-M3 library: defaults keep the older version");
+    e->name=L"ai options";e->chain=toChain(ai);e->globals=ChainGlobalSettings::capture(ai);
+    e->contents=presetContentMask(PresetContent::Chain)|presetContentMask(PresetContent::FrameGeneration);
+    e->fg.multiplier=ai.multiplier;e->fg.backend=ai.frameGenerationBackend;e->fg.vfgQuality=ai.vfgQuality;
+    check(writer.put(*e)&&readBytes(path)==original,"M1-M3 library: the older file keeps its bytes");
+    const auto aiSidecar=[&](const std::filesystem::path& base){
+        for(const auto& f:std::filesystem::directory_iterator(base.parent_path()))
+            if(f.path().filename().wstring().starts_with(base.filename().wstring())&&
+               f.path().filename().wstring().ends_with(L".ai-options"))return f.path();
+        return std::filesystem::path{};};
+    const auto sidecar=aiSidecar(path);
+    check(!sidecar.empty()&&readBytes(sidecar).starts_with("VEYRA_PRESET_LIBRARY 23"),"M1-M3 library: v23 lives in the .ai-options sidecar");
+    PresetLibrary reader(path);reader.setIncludeBuiltins(false);
+    const bool loaded=reader.load()&&reader.entries().size()==2;
+    check(loaded,"M1-M3 library: a fresh reader finds the sidecar");
+    if(loaded){
+        const auto& g=reader.entries()[1].globals;
+        check(g&&g->fsrSrVersionMode==2&&!g->fsrSrReactiveMask&&g->fsrSrSharpening&&g->fsrSrSharpness==0.8f&&
+              g->amfFrcProfile==3&&g->amfFrcMvSearch==2&&g->amfFrcUseFutureFrame,"M1-M3 library: the seven options round-trip");
+        auto applied=sample();PresetLibrary::apply(reader.entries()[1],applied);
+        check(applied.fsrSrVersionMode==2&&!applied.fsrSrReactiveMask&&applied.fsrSrSharpening&&applied.fsrSrSharpness==0.8f&&
+              applied.amfFrcProfile==3&&applied.amfFrcMvSearch==2&&applied.amfFrcUseFutureFrame,"M1-M3 library: applying the chain restores the seven options");
+        check(applied.sr&&applied.videoSrQuality==kVideoSrFsr&&applied.multiplier==2&&applied.frameGenerationBackend==FrameGenerationBackend::AmdFrc,
+              "M1-M3 library: applying restores the owning settings");
+        if(!applied.validate().empty())std::printf("      (validate: %s)\n",applied.validate().c_str());
+        check(applied.validate().empty(),"M1-M3 library: the applied settings validate");
+    }
+    const auto exported=scratch(L"ai-options-export.v23");
+    check(writer.exportEntry(1,exported)&&readBytes(exported).starts_with("VEYRA_PRESET_LIBRARY 23"),"M1-M3 library: export declares v23");
+    PresetLibrary imported(scratch(L"ai-options-import.v1"));imported.setIncludeBuiltins(false);std::wstring importedName;
+    check(imported.load()&&imported.importFile(exported,importedName)&&imported.entries().size()==1&&
+          imported.entries()[0].globals&&imported.entries()[0].globals->fsrSrVersionMode==2&&
+          imported.entries()[0].globals->amfFrcProfile==3,"M1-M3 library: import keeps the seven options");
+
+    // Session: one configuration replaces the list configuration, so the
+    // seven fields have to be compared by ChainConfiguration::operator== too.
+    const auto sessionPath=scratch(L"ai-options-session.v1");
+    for(const auto* suffix:{L".ai-options",L".auto-fg",L".output-controls",L".dual-sr",L".sr-stage"})
+        std::filesystem::remove(std::filesystem::path(sessionPath).concat(suffix));
+    auto session=std::make_unique<ChainSession>(ChainSession::initial(sample()));
+    ChainSessionStore sessions(sessionPath);
+    check(sessions.save(*session),"M1-M3 session: save an ordinary session");
+    const auto old=readBytes(sessionPath);
+    check(!old.starts_with("VEYRA_CHAIN_SESSION 18"),"M1-M3 session: defaults keep the older version");
+    session->configurations[0]=ChainConfiguration::capture(toChain(ai),ai,-1,-1);
+    check(sessions.save(*session)&&readBytes(sessionPath)==old,"M1-M3 session: the older file keeps its bytes");
+    const auto sessionSidecar=aiSidecar(sessionPath);
+    check(!sessionSidecar.empty()&&readBytes(sessionSidecar).starts_with("VEYRA_CHAIN_SESSION 18"),"M1-M3 session: v18 lives in the .ai-options sidecar");
+    auto back=std::make_unique<ChainSession>();ChainSessionStore reload(sessionPath);
+    const bool restored=reload.load(*back);
+    check(restored&&back->configurations.size()==session->configurations.size()&&back->configurations[0]==session->configurations[0],
+          "M1-M3 session: the whole configuration round-trips");
+    check(restored&&back->configurations[0].fsrSrVersionMode==2&&!back->configurations[0].fsrSrReactiveMask&&
+          back->configurations[0].fsrSrSharpening&&back->configurations[0].fsrSrSharpness==0.8f&&
+          back->configurations[0].amfFrcProfile==3&&back->configurations[0].amfFrcMvSearch==2&&back->configurations[0].amfFrcUseFutureFrame,
+          "M1-M3 session: the seven options round-trip");
+}
+// Spatial single-frame SR (W6): 24 ArtCNN 4-bit, 25 ArtCNN 16-bit, 26 AMF
+// HQScaler, 27 AMF VQ Enhancer, 28 ORT-DML SPAN, 29 ORT-DML RealPLKSR. The values
+// are not new fields, so they ride the existing .ai-options sidecar (library v23,
+// session v18) instead of a new version - which only holds while aiOptionsOf()
+// classifies them as AI options. A build without them therefore keeps reading and
+// writing the older files unchanged.
+__declspec(noinline) void testSpatialSrStorage() {
+    const auto aiSidecar=[&](const std::filesystem::path& base){
+        for(const auto& f:std::filesystem::directory_iterator(base.parent_path()))
+            if(f.path().filename().wstring().starts_with(base.filename().wstring())&&
+               f.path().filename().wstring().ends_with(L".ai-options"))return f.path();
+        return std::filesystem::path{};};
+    const auto clear=[&](const std::filesystem::path& path){
+        for(const auto* suffix:{L".ai-options",L".auto-fg",L".output-controls",L".dual-sr",L".sr-stage",L".field-render"})
+            std::filesystem::remove(std::filesystem::path(path).concat(suffix));
+    };
+    const auto path=scratch(L"spatial-sr-library.v1");
+    clear(path);
+    PresetLibrary writer(path);writer.setIncludeBuiltins(false);
+    auto plain=std::make_unique<PresetEntry>();plain->name=L"plain";plain->kind=ChainMode::List;
+    plain->contents=presetContentMask(PresetContent::Chain);plain->chain=toChain(sample());
+    plain->globals=ChainGlobalSettings::capture(sample());
+    check(writer.load()&&writer.put(*plain),"spatial SR library: an ordinary library");
+    const auto original=readBytes(path);
+    check(!original.starts_with("VEYRA_PRESET_LIBRARY 23"),"spatial SR library: defaults keep the older version");
+    check(aiSidecar(path).empty(),"spatial SR library: defaults write no .ai-options sidecar");
+    for(uint32_t quality:{24u,27u,29u}){
+        PresetLibrary library(path);library.setIncludeBuiltins(false);
+        check(library.load(),"spatial SR library: reload before save");
+        auto s=sample();s.sr=true;s.srTarget=veyra::pipeline::SrTarget::Uhd4K;s.videoSrQuality=quality;
+        check(s.validate().empty(),"spatial SR library: the spatial value validates");
+        auto e=std::make_unique<PresetEntry>();e->name=L"spatial"+std::to_wstring(quality);e->kind=ChainMode::List;
+        e->contents=presetContentMask(PresetContent::Chain);e->chain=toChain(s);e->globals=ChainGlobalSettings::capture(s);
+        check(library.put(*e),"spatial SR library: save an entry with a spatial SR value");
+        check(readBytes(path)==original,"spatial SR library: the older file keeps its bytes");
+    }
+    const auto sidecar=aiSidecar(path);
+    check(!sidecar.empty()&&readBytes(sidecar).starts_with("VEYRA_PRESET_LIBRARY 23"),
+          "spatial SR library: the values ride the v23 .ai-options sidecar");
+    PresetLibrary reader(path);reader.setIncludeBuiltins(false);
+    const bool loaded=reader.load()&&reader.entries().size()==4;
+    check(loaded,"spatial SR library: a fresh reader finds the sidecar");
+    uint32_t lastQuality=0;
+    if(loaded){
+        const auto& g=reader.entries()[3].globals;
+        if(g)lastQuality=g->videoSrQuality;
+        check(g&&g->videoSrQuality==29&&g->srTarget==veyra::pipeline::SrTarget::Uhd4K,
+              "spatial SR library: the last spatial value round-trips");
+        auto applied=sample();PresetLibrary::apply(reader.entries()[3],applied);
+        check(applied.sr&&applied.videoSrQuality==29&&applied.validate().empty(),
+              "spatial SR library: applying restores the spatial SR value");
+    }
+    const auto exported=scratch(L"spatial-sr-export.v23");
+    check(loaded&&reader.exportEntry(3,exported)&&readBytes(exported).starts_with("VEYRA_PRESET_LIBRARY 23"),
+          "spatial SR library: export declares v23");
+    PresetLibrary imported(scratch(L"spatial-sr-import.v1"));imported.setIncludeBuiltins(false);std::wstring importedName;
+    check(imported.load()&&imported.importFile(exported,importedName)&&imported.entries().size()==1&&
+          imported.entries()[0].globals&&imported.entries()[0].globals->videoSrQuality==29,
+          "spatial SR library: import keeps the spatial value");
+
+    // Mode session: the same value in ChainGlobalSettings takes the v18 sidecar.
+    const auto sessionPath=scratch(L"spatial-sr-session.v1");
+    clear(sessionPath);
+    auto session=std::make_unique<ChainSession>(ChainSession::initial(sample()));
+    ChainSessionStore sessions(sessionPath);
+    check(sessions.save(*session),"spatial SR session: save an ordinary session");
+    const auto old=readBytes(sessionPath);
+    check(!old.starts_with("VEYRA_CHAIN_SESSION 18"),"spatial SR session: defaults keep the older version");
+    auto amf=sample();amf.sr=true;amf.videoSrQuality=26;
+    check(amf.validate().empty(),"spatial SR session: the AMF HQScaler value validates");
+    session->configurations[0]=ChainConfiguration::capture(toChain(amf),amf,-1,-1);
+    check(sessions.save(*session)&&readBytes(sessionPath)==old,"spatial SR session: the older file keeps its bytes");
+    const auto sessionSidecar=aiSidecar(sessionPath);
+    check(!sessionSidecar.empty()&&readBytes(sessionSidecar).starts_with("VEYRA_CHAIN_SESSION 18"),
+          "spatial SR session: the value rides the v18 .ai-options sidecar");
+    auto back=std::make_unique<ChainSession>();ChainSessionStore reload(sessionPath);
+    const bool restored=reload.load(*back);
+    check(restored&&back->configurations.size()==session->configurations.size()&&back->configurations[0]==session->configurations[0],
+          "spatial SR session: the whole configuration round-trips");
+    check(restored&&back->configurations[0].videoSrQuality==26,
+          "spatial SR session: the AMF HQScaler value round-trips");
+}
 int main(int argc,char** argv) {
     if(argc==2&&std::string_view(argv[1])=="--dedup-migration"){
         testDedupModeMigration();testFlowStorage();testFlowApplication();return failures?1:0;
@@ -1493,6 +1651,8 @@ int main(int argc,char** argv) {
     testDlssSrModels();
     testSrStageStorage();
     testDualSrStorage();
+    testAiOptionsStorage();
+    testSpatialSrStorage();
     testFlowStorage();
     testFlowApplication();
     testNrCorrectionStorage();

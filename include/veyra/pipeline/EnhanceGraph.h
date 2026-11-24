@@ -52,7 +52,7 @@ struct SwsContext;
 struct NVSDK_NGX_Parameter;
 struct NVSDK_NGX_Handle;
 namespace veyra::guidance { class AmdOpticalFlow; class GpuDisOpticalFlow; }
-namespace veyra::pipeline { class VfgBackend; class VfxSrBackend; }
+namespace veyra::pipeline { class VfgBackend; class VfxSrBackend; class ArtCnnBackend; class OrtDmlSrBackend; }
 
 namespace veyra::gfx {
 class D3D12DeviceContext;
@@ -60,6 +60,8 @@ class CommandSlotRing;
 class FsrSrBackend;
 class FsrFgPresenter;
 class AmfFrcBackend;
+class AmfHqScalerBackend;
+class AmfVqEnhancerBackend;
 }
 
 namespace veyra::ngx {
@@ -91,6 +93,10 @@ struct EnhanceGraphDesc {
     uint32_t workHeight = 2160;
     uint32_t videoSrQuality=0;
     uint32_t dlssSrModel=0;      // engine::EnhancementSettings::dlssSrModel (DLSS SR only)
+    uint32_t fsrSrVersionMode=0; // engine::EnhancementSettings::fsrSrVersionMode
+    bool fsrSrReactiveMask=true;
+    bool fsrSrSharpening=false;
+    float fsrSrSharpness=0.5f;
     bool enableSr = false;       // upscale source -> work extent (1:1 bypass otherwise)
     bool enableNr = true;
     bool nrBeforeSr = false;
@@ -154,6 +160,9 @@ struct EnhanceGraphDesc {
     bool vfgAutoRegulate=false;
     bool vfgFastFallback=false; // live 2X with vfgAutoRegulate: also load the next faster VFG model
     bool hudLock=false; // Live HUD Lock (HudLock.h, from PushFPS), graph frame generation only
+    uint32_t amfFrcProfile=0;
+    uint32_t amfFrcMvSearch=0;
+    bool amfFrcUseFutureFrame=false;
     uint64_t settingsRevision=1;
     engine::FlowQuality flowQuality=engine::FlowQuality::Balanced;
     engine::OpticalFlowBackend opticalFlowBackend=engine::OpticalFlowBackend::Nvidia;
@@ -783,6 +792,20 @@ public:
         (desc_.finalSrQuality()==engine::kVideoSrFsr || desc_.firstSrRuns(engine::kVideoSrFsr)); }
     // Out of line: the backend type is only forward declared here.
     bool fsrSrEnabled() const;
+    // Phase-1 spatial single-frame SR (24..29). These run without motion vectors
+    // and never take the double-SR second pass. "Requested" means the settings
+    // and extents ask for the stage; "enabled" means its backend really opened.
+    // The gap is what EngineController turns into FailedBackend::Sr.
+    // ArtCNN is exact 2x only: a non-2x extent reports not-requested and runSr()
+    // keeps the plain resize instead of dropping the user's SR toggle.
+    bool artcnnSrRequested() const;
+    bool artcnnSrEnabled() const;
+    bool amfHqSrRequested() const;
+    bool amfHqSrEnabled() const;
+    bool amfVqSrRequested() const;
+    bool amfVqSrEnabled() const;
+    bool ortDmlSrRequested() const;
+    bool ortDmlSrEnabled() const;
     // Requested output multiplier (2 = one generated frame). Consumed by the
     // present sink so the XeSS provider knows how many frames to generate.
     uint32_t fgMultiplier() const { return desc_.fgMultiplier; }
@@ -886,6 +909,10 @@ private:
     bool initNvof();
     bool initNgxFeatures();
     bool initFsrSr();
+    bool initArtcnnSr();
+    bool initAmfHqSr();
+    bool initAmfVqSr();
+    bool initOrtDmlSr();
     bool initFsrFg();
     bool initVfg();
     bool initAmfFrc();
@@ -1006,6 +1033,7 @@ private:
     ComputePass srPrescalePass_,srResolvePass_; // area shrinks: double SR reduction / supersample shrink after RTX Video SR
     ComputePass firstSrRestorePass_;
     ComputePass downsamplePass_,residualPass_,stackProtectionPass_,flowAdaptPass_;
+    ComputePass fsrReactiveMaskPass_;
     ComputePass flowRefinePass_,flowFillPass_,fgFlowAdaptPass_,flowClaimPass_;
     // Stage-5 output stabiliser (anti-flicker). Constructed only when the
     // setting is non-zero; a default (0) session never allocates it and the
@@ -1184,6 +1212,12 @@ private:
     bool initHudLock();
     void composeHudLock(ID3D12GraphicsCommandList* list,unsigned generatedSlot,unsigned heldParity);
     std::unique_ptr<gfx::FsrSrBackend> fsrSrBackend_;
+    // Phase-1 spatial SR backends (24..29). At most one of them opens: the SR
+    // quality ID selects the stage and they are mutually exclusive.
+    std::unique_ptr<ArtCnnBackend> artcnnSrBackend_;
+    std::unique_ptr<gfx::AmfHqScalerBackend> amfHqSrBackend_;
+    std::unique_ptr<gfx::AmfVqEnhancerBackend> amfVqSrBackend_;
+    std::unique_ptr<OrtDmlSrBackend> ortDmlSrBackend_;
     // Double SR first passes on DLSS SR / FSR (the final pass keeps the members above).
     std::unique_ptr<ngx::DlssSrBackend> firstDlssSrBackend_;
     std::unique_ptr<gfx::FsrSrBackend> firstFsrSrBackend_;
@@ -1192,6 +1226,16 @@ private:
     // extent for a single FSR pass; under double SR the largest render/motion
     // extent of its DLSS SR / FSR passes (larger inputs are read in their subrect).
     ComPtr<ID3D12Resource> fsrSrDepth_, upFsrSrDepth_, fsrSrZeroMotion_, upFsrSrZeroMotion_;
+    ComPtr<ID3D12Resource> fsrSrReactive_, fsrSrPrevColor_[2];
+    ComPtr<ID3D12Resource> firstFsrSrReactive_, firstFsrSrPrevColor_[2];
+    uint32_t fsrSrPrevSlot_=0, firstFsrSrPrevSlot_=0;
+    bool fsrSrPrevValid_=false, firstFsrSrPrevValid_=false;
+    ID3D12Resource* prepareFsrReactiveMask(ID3D12GraphicsCommandList* list, UINT passIndex,
+                                           ID3D12Resource* currColor, ID3D12Resource* motionTex,
+                                           ID3D12Resource* reactive, ID3D12Resource* const prev[2],
+                                           uint32_t& prevSlot, bool& prevValid,
+                                           uint32_t width, uint32_t height,
+                                           bool validMotion, bool reset);
     size_t fsrSrDepthPitch_=0;
     uint32_t fsrAuxW_=0,fsrAuxH_=0;
     NVSDK_NGX_Parameter* ngxParams_ = nullptr;

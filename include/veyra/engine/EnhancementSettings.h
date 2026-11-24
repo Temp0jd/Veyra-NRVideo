@@ -90,6 +90,15 @@ inline size_t exportBitrateIndex(uint32_t mbps){for(size_t i=0;i<kExportBitrateC
 // videoSrQuality values: 0 = DLSS SR, 1..4 = RTX video SR quality steps,
 // 5 = AMD FSR upscaling (vendor neutral; verified on an NVIDIA adapter).
 inline constexpr uint32_t kVideoSrFsr=5;
+// Spatial single-frame CNN / vendor SR methods (see spatialCnnVideoSr below).
+// IDs 24..29 are vendor neutral: they never need motion vectors and run on
+// NVIDIA, AMD and Intel adapters alike.
+inline constexpr uint32_t kVideoSrArtCnnC4F16=24;
+inline constexpr uint32_t kVideoSrArtCnnC4F32=25;
+inline constexpr uint32_t kVideoSrAmfHqScaler=26;
+inline constexpr uint32_t kVideoSrAmfVqEnhancer=27;
+inline constexpr uint32_t kVideoSrDmlSpan=28;
+inline constexpr uint32_t kVideoSrDmlRealPlksr=29;
 // Fresh SR selections use RTX Video SR medium; explicit saved selections retain
 // their numeric IDs. The UI seeds FSR separately on AMD/Intel adapters.
 inline constexpr uint32_t kDefaultVideoSrQuality=2;
@@ -106,9 +115,16 @@ enum class VideoSrFamily : uint32_t { Standard = 0, HighBitrate = 1, Streaming =
 inline constexpr uint32_t kVideoSrFamilyCount=3;
 constexpr bool ngxVideoSr(uint32_t q){return q>=1&&q<=4;}
 constexpr bool vfxVideoSr(uint32_t q){return (q>=16&&q<=19)||q==21||q==23;}
+// Spatial single-frame CNN / AMF / DirectML SR methods (vendor-neutral, never temporal).
+constexpr bool artcnnVideoSr(uint32_t q){return q==kVideoSrArtCnnC4F16||q==kVideoSrArtCnnC4F32;}
+constexpr bool amfHqVideoSr(uint32_t q){return q==kVideoSrAmfHqScaler;}
+constexpr bool amfVqVideoSr(uint32_t q){return q==kVideoSrAmfVqEnhancer;}
+constexpr bool amfVideoSr(uint32_t q){return amfHqVideoSr(q)||amfVqVideoSr(q);}
+constexpr bool dmlVideoSr(uint32_t q){return q==kVideoSrDmlSpan||q==kVideoSrDmlRealPlksr;}
+constexpr bool spatialCnnVideoSr(uint32_t q){return artcnnVideoSr(q)||amfVideoSr(q)||dmlVideoSr(q);}
 constexpr bool vfxVideoSrNeedsAmpere(uint32_t q){return q==21||q==23;}
 constexpr bool rtxVideoSr(uint32_t q){return ngxVideoSr(q)||vfxVideoSr(q);}
-constexpr bool validVideoSrQuality(uint32_t q){return q<=kVideoSrFsr||vfxVideoSr(q);}
+constexpr bool validVideoSrQuality(uint32_t q){return q<=kVideoSrFsr||vfxVideoSr(q)||spatialCnnVideoSr(q);}
 // DLSS SR and FSR are temporal: they read the SR motion source. RTX Video SR is spatial.
 constexpr bool temporalVideoSr(uint32_t q){return q==0||q==kVideoSrFsr;}
 inline constexpr uint32_t kVfxVideoSrQualities[]={16,17,18,19,21,23};
@@ -126,6 +142,9 @@ constexpr uint32_t videoSrQualityFor(VideoSrFamily family,uint32_t tier){
 // (preset M), 2 = DLSS 4.5 Ultra Performance model (preset L). Both 4.5
 // models ship in the DLSS 310.5+ runtime already packaged (310.7).
 inline constexpr uint32_t kDlssSrModelCount=3;
+inline constexpr uint32_t kFsrSrVersionModeCount=3;
+inline constexpr uint32_t kAmfFrcProfileCount=4;
+inline constexpr uint32_t kAmfFrcMvSearchCount=3;
 // Capture audio ingress policy. Automatic is what the pipeline did before the
 // manual selector existed; the other two exist because Dolby/DTS passthrough
 // negotiation depends on the device and the console, and users reported that
@@ -425,6 +444,10 @@ struct EnhancementSettings {
     pipeline::SrTarget srTarget=pipeline::SrTarget::Uhd4K;
     uint32_t videoSrQuality=kDefaultVideoSrQuality; // 0 DLSS SR; 5 FSR; RTX Video SR family/tier values (videoSrFamily)
     uint32_t dlssSrModel=0;    // DLSS SR only; see kDlssSrModelCount
+    uint32_t fsrSrVersionMode=0; // 0=Auto (highest/FSR4->3 fallback), 1=FSR 3.x, 2=FSR 4.x
+    bool fsrSrReactiveMask=true;
+    bool fsrSrSharpening=false;
+    float fsrSrSharpness=0.5f;
     // Base SR uses srTarget; the optional second SR has its own target/quality.
     // srPrescale now lowers the first AI result only when dualSrEnabled.
     // srOutput shrinks a single RTX Video SR result (supersampling); double SR
@@ -510,6 +533,9 @@ struct EnhancementSettings {
     // UI "HUD 自动锁定" (pipeline/HudLock.h, from PushFPS): a per-pixel HUD mask found every
     // frame and kept out of graph frame generation. Its passes exist only when on.
     bool hudLock=false;
+    uint32_t amfFrcProfile=0;      // 0=Auto, 1=Low, 2=High, 3=Super
+    uint32_t amfFrcMvSearch=0;     // 0=Auto, 1=Native, 2=Performance
+    bool amfFrcUseFutureFrame=false;
     ContentRate content=ContentRate::Transport;
     AudioSyncMode audioSync=AudioSyncMode::Automatic;
     int32_t audioOffsetMs=0;
@@ -544,6 +570,12 @@ struct EnhancementSettings {
         if(!sr){active.srTarget=defaults.srTarget;active.videoSrQuality=defaults.videoSrQuality;active.srMotion=defaults.srMotion;}
         // The DLSS SR model serves every DLSS SR pass, the second of a double SR too.
         if(!usesDlaa()&&(!sr||(videoSrQuality!=0&&!(dualSrEnabled&&dualSrQuality==0))))active.dlssSrModel=defaults.dlssSrModel;
+        if(!sr||(videoSrQuality!=kVideoSrFsr&&!(dualSrEnabled&&dualSrQuality==kVideoSrFsr))){
+            active.fsrSrVersionMode=defaults.fsrSrVersionMode;
+            active.fsrSrReactiveMask=defaults.fsrSrReactiveMask;
+            active.fsrSrSharpening=defaults.fsrSrSharpening;
+            active.fsrSrSharpness=defaults.fsrSrSharpness;
+        }
         if(!sr||!dualSrEnabled){
             active.srPrescale=defaults.srPrescale;
             active.dualSrEnabled=false;active.dualSrTarget=defaults.dualSrTarget;active.dualSrQuality=defaults.dualSrQuality;
@@ -590,6 +622,11 @@ struct EnhancementSettings {
         if(!(multiplier>1))active.pacingRepair=defaults.pacingRepair;
         // XeSS generates inside its own presenter; HUD Lock works on graph frame generation.
         if(!(multiplier>1&&frameGenerationBackend!=FrameGenerationBackend::XeSS))active.hudLock=defaults.hudLock;
+        if(!(multiplier>1&&frameGenerationBackend==FrameGenerationBackend::AmdFrc)){
+            active.amfFrcProfile=defaults.amfFrcProfile;
+            active.amfFrcMvSearch=defaults.amfFrcMvSearch;
+            active.amfFrcUseFutureFrame=defaults.amfFrcUseFutureFrame;
+        }
         return active;
     }
     bool sameActiveVideoParameters(const EnhancementSettings& other) const {
@@ -702,6 +739,10 @@ struct EnhancementSettings {
         if(frameGenerationBackend==FrameGenerationBackend::AmdFrc&&multiplier>2)return "AMD FRC supports 2X only";
         if(!validVideoSrQuality(videoSrQuality))return "invalid video SR quality";
         if(dlssSrModel>=kDlssSrModelCount)return "invalid DLSS SR model";
+        if(fsrSrVersionMode>=kFsrSrVersionModeCount)return "invalid FSR SR version mode";
+        if(!std::isfinite(fsrSrSharpness)||fsrSrSharpness<0.0f||fsrSrSharpness>1.0f)return "invalid FSR SR sharpness";
+        if(amfFrcProfile>=kAmfFrcProfileCount)return "invalid AMF FRC profile";
+        if(amfFrcMvSearch>=kAmfFrcMvSearchCount)return "invalid AMF FRC motion search mode";
         if(!pipeline::validSrTarget(srTarget))return "invalid SR target";
         if(!pipeline::validSrPrescale(srPrescale))return "invalid SR prescale";
         if(!pipeline::validSrOutput(srOutput))return "invalid SR output";

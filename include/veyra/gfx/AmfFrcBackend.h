@@ -27,8 +27,17 @@ public:
     AmfFrcBackend& operator=(const AmfFrcBackend&) = delete;
     // An AMD driver's AMF runtime is installed (file check only, nothing loaded).
     static bool runtimeInstalled();
+    enum class Profile : uint8_t { Auto = 0, Low = 1, High = 2, Super = 3 };
+    enum class MvSearchMode : uint8_t { Auto = 0, Native = 1, Performance = 2 };
+    struct Config {
+        bool lowPower = false;
+        Profile profile = Profile::Auto;
+        MvSearchMode mvSearchMode = MvSearchMode::Auto;
+        bool useFutureFrame = false;
+    };
     // lowPower: the downscaled motion search AMD suggests for APUs and low-end GPUs.
     bool initialize(ID3D12Device*, ID3D12CommandQueue*, uint32_t width, uint32_t height, DXGI_FORMAT, bool lowPower);
+    bool initialize(ID3D12Device*, ID3D12CommandQueue*, uint32_t width, uint32_t height, DXGI_FORMAT, const Config& config);
     // `color` is in COPY_SOURCE; the list runs on the queue given to initialize().
     bool capture(ID3D12GraphicsCommandList*, ID3D12Resource* color);
     // After the list holding capture() was submitted. reset drops AMF's history

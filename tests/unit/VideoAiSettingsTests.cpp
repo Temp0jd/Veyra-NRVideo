@@ -33,8 +33,8 @@ bool kept(const std::map<std::wstring,std::string>& before,const std::map<std::w
     return std::all_of(before.begin(),before.end(),[&](const auto& f){const auto it=after.find(f.first);return it!=after.end()&&it->second==f.second;});
 }
 veyra::pipeline::EnhanceGraphDesc describe(const EnhancementSettings& s,uint32_t width,uint32_t height,veyra::pipeline::ResolutionPlan* plan=nullptr,
-                                           bool nvidia=true,bool still=false){
-    StageRequest request;request.sr=s.sr;request.width=width;request.height=height;request.nvidiaAdapter=nvidia;request.stillImage=still;
+                                           bool nvidia=true,bool still=false,bool amdAdapter=false){
+    StageRequest request;request.sr=s.sr;request.width=width;request.height=height;request.nvidiaAdapter=nvidia;request.amdAdapter=amdAdapter;request.stillImage=still;
     veyra::pipeline::EnhanceGraphDesc desc;const auto p=describeStages(request,s,desc);
     if(plan)*plan=p;
     return desc;
@@ -48,7 +48,7 @@ int wmain(int argc,wchar_t** argv){
     for(uint32_t q=0;q<40;++q){
         const bool rtx=(q>=1&&q<=4)||(q>=16&&q<=19)||q==21||q==23;
         check(rtxVideoSr(q)==rtx,"RTX Video SR family values");
-        check(validVideoSrQuality(q)==(rtx||q==0||q==kVideoSrFsr),"stored SR quality table");
+        check(validVideoSrQuality(q)==(rtx||q==0||q==kVideoSrFsr||spatialCnnVideoSr(q)),"stored SR quality table");
         EnhancementSettings s;s.sr=true;s.videoSrQuality=q;
         check(s.validate().empty()==validVideoSrQuality(q),"validation accepts exactly the stored SR qualities");
         check(ngxVideoSr(q)==(q>=1&&q<=4)&&vfxVideoSr(q)==(rtx&&q>4),"standard runs on NGX, the others on Video Effects");
@@ -75,7 +75,7 @@ int wmain(int argc,wchar_t** argv){
         check(s.validate().empty(),"high bitrate base with a streaming second pass");
         auto active=s.activeVideoSettings();
         check(active.dualSrEnabled&&active.dualSrQuality==23&&active.srPrescale==SrPrescale::P1080,"double SR stays active on high bitrate");
-        for(uint32_t bad2:{6u,15u,20u,22u,24u}){auto bad=s;bad.dualSrQuality=bad2;check(!bad.validate().empty(),"second SR must be a stored SR value");}
+        for(uint32_t bad2:{6u,15u,20u,22u,30u}){auto bad=s;bad.dualSrQuality=bad2;check(!bad.validate().empty(),"second SR must be a stored SR value");}
         for(uint32_t good2:{0u,kVideoSrFsr}){auto good=s;good.dualSrQuality=good2;check(good.validate().empty(),"DLSS SR and FSR are valid second passes");}
         s.videoSrQuality=4;s.dualSrQuality=17;check(s.validate().empty()&&s.activeVideoSettings().dualSrEnabled,"standard base with a high bitrate second pass");
         s.videoSrQuality=0;check(s.activeVideoSettings().dualSrEnabled,"a DLSS SR base runs double SR");
@@ -266,6 +266,263 @@ int wmain(int argc,wchar_t** argv){
               bytes(sidecar(anyPath,L".dual-sr-any")).starts_with("VEYRA_CHAIN_SESSION 14"),"session writes v14 to the .dual-sr-any sidecar only");
         auto anyRestored=std::make_unique<ChainSession>();ChainSessionStore anyReader(anyPath);
         check(anyReader.load(*anyRestored)&&*anySession==*anyRestored,"session restart restores the DLSS SR second pass");
+    }
+
+    // Milestone 3: FSR SR & AMF FRC settings normalization, validation, graph description, and rebuild checks.
+    {
+        EnhancementSettings fsr;
+        check(fsr.fsrSrVersionMode==0&&fsr.fsrSrReactiveMask&&!fsr.fsrSrSharpening&&fsr.fsrSrSharpness==0.5f,"FSR SR defaults preserved");
+        check(fsr.amfFrcProfile==0&&fsr.amfFrcMvSearch==0&&!fsr.amfFrcUseFutureFrame,"AMF FRC defaults preserved");
+
+        fsr.sr=true;fsr.videoSrQuality=kVideoSrFsr;
+        fsr.fsrSrVersionMode=2;fsr.fsrSrReactiveMask=false;fsr.fsrSrSharpening=true;fsr.fsrSrSharpness=0.8f;
+        check(fsr.validate().empty(),"valid FSR SR settings accepted");
+        const auto activeFsr=fsr.activeVideoSettings();
+        check(activeFsr.fsrSrVersionMode==2&&!activeFsr.fsrSrReactiveMask&&activeFsr.fsrSrSharpening&&activeFsr.fsrSrSharpness==0.8f,"activeVideoSettings preserves FSR SR config when FSR active");
+
+        auto fsrSecond=fsr;fsrSecond.videoSrQuality=4;fsrSecond.dualSrEnabled=true;fsrSecond.dualSrQuality=kVideoSrFsr;
+        check(fsrSecond.activeVideoSettings().fsrSrVersionMode==2,"activeVideoSettings preserves FSR SR config on dual SR second pass");
+
+        auto nonFsr=fsr;nonFsr.videoSrQuality=0;
+        const auto normNonFsr=nonFsr.activeVideoSettings();
+        check(normNonFsr.fsrSrVersionMode==0&&normNonFsr.fsrSrReactiveMask&&!normNonFsr.fsrSrSharpening&&normNonFsr.fsrSrSharpness==0.5f,"activeVideoSettings normalizes FSR SR fields when FSR inactive");
+
+        auto bad=fsr;bad.fsrSrVersionMode=kFsrSrVersionModeCount;check(!bad.validate().empty(),"reject out-of-range fsrSrVersionMode");
+        bad=fsr;bad.fsrSrSharpness=1.5f;check(!bad.validate().empty(),"reject out-of-range fsrSrSharpness");
+
+        const auto fsrDesc=describe(fsr,1920,1080);
+        check(fsrDesc.fsrSrVersionMode==2&&!fsrDesc.fsrSrReactiveMask&&fsrDesc.fsrSrSharpening&&fsrDesc.fsrSrSharpness==0.8f,"describeStages propagates FSR SR config");
+
+        auto fsrNext=fsr;fsrNext.fsrSrVersionMode=1;
+        check(requiresGraphRebuild(fsr,fsrNext),"changing fsrSrVersionMode requires rebuild");
+        fsrNext=fsr;fsrNext.fsrSrReactiveMask=true;
+        check(requiresGraphRebuild(fsr,fsrNext),"changing fsrSrReactiveMask requires rebuild");
+        fsrNext=fsr;fsrNext.fsrSrSharpness=0.3f;
+        check(!requiresGraphRebuild(fsr,fsrNext),"changing fsrSrSharpness updates live without rebuild");
+
+        EnhancementSettings amf;amf.multiplier=2;amf.frameGenerationBackend=FrameGenerationBackend::AmdFrc;
+        amf.amfFrcProfile=3;amf.amfFrcMvSearch=2;amf.amfFrcUseFutureFrame=true;
+        check(amf.validate().empty(),"valid AMF FRC settings accepted");
+        const auto activeAmf=amf.activeVideoSettings();
+        check(activeAmf.amfFrcProfile==3&&activeAmf.amfFrcMvSearch==2&&activeAmf.amfFrcUseFutureFrame,"activeVideoSettings preserves AMF FRC config");
+        auto nonAmf=amf;nonAmf.frameGenerationBackend=FrameGenerationBackend::Dlss;
+        const auto normNonAmf=nonAmf.activeVideoSettings();
+        check(normNonAmf.amfFrcProfile==0&&normNonAmf.amfFrcMvSearch==0&&!normNonAmf.amfFrcUseFutureFrame,"activeVideoSettings normalizes AMF FRC fields when inactive");
+
+        bad=amf;bad.amfFrcProfile=kAmfFrcProfileCount;check(!bad.validate().empty(),"reject out-of-range amfFrcProfile");
+        bad=amf;bad.amfFrcMvSearch=kAmfFrcMvSearchCount;check(!bad.validate().empty(),"reject out-of-range amfFrcMvSearch");
+
+        const auto amfDesc=describe(amf,1920,1080);
+        check(amfDesc.amfFrcProfile==3&&amfDesc.amfFrcMvSearch==2&&amfDesc.amfFrcUseFutureFrame,"describeStages propagates AMF FRC config");
+        auto amfNext=amf;amfNext.amfFrcUseFutureFrame=false;
+        check(requiresGraphRebuild(amf,amfNext),"changing AMF FRC config requires rebuild");
+    }
+
+    // M1-M3 persistence (2026-11-24): the seven FSR SR / AMF FRC options are a
+    // new settings version (v38) because an older reader would take them as the
+    // next entry's fields. The switches they belong to (sr + FSR base, AMF FRC
+    // frame generation) are stored in the same file, so a reload has to restore
+    // both. Files that never touch the options keep their own version and bytes.
+    {
+        EnhancementSettings ai;ai.sr=true;ai.videoSrQuality=kVideoSrFsr;
+        ai.fsrSrVersionMode=2;ai.fsrSrReactiveMask=false;ai.fsrSrSharpening=true;ai.fsrSrSharpness=0.8f;
+        ai.multiplier=2;ai.frameGenerationBackend=FrameGenerationBackend::AmdFrc;
+        ai.amfFrcProfile=3;ai.amfFrcMvSearch=2;ai.amfFrcUseFutureFrame=true;
+        check(ai.validate().empty(),"M1-M3 preset values validate");
+        const auto aiActive=ai.activeVideoSettings();
+        check(aiActive.fsrSrVersionMode==2&&!aiActive.fsrSrReactiveMask&&aiActive.fsrSrSharpening&&aiActive.fsrSrSharpness==0.8f&&
+              aiActive.amfFrcProfile==3&&aiActive.amfFrcMvSearch==2&&aiActive.amfFrcUseFutureFrame,
+              "activeVideoSettings keeps the M1-M3 values while FSR SR and AMF FRC run");
+        const auto aiPath=root/L"m1-m3.txt";
+        PresetStore writer(aiPath);
+        check(writer.load()&&writer.put(L"ai",ai),"settings preset with M1-M3 options");
+        check(bytes(aiPath).starts_with("VEYRA_PRESETS 38"),"M1-M3 options write v38");
+        PresetStore reader(aiPath);
+        const bool reloaded=reader.load()&&reader.entries().size()==1;
+        check(reloaded,"v38 reload");
+        if(reloaded){
+            const auto& got=reader.entries().front().settings;
+            check(got.fsrSrVersionMode==2&&!got.fsrSrReactiveMask&&got.fsrSrSharpening&&got.fsrSrSharpness==0.8f&&
+                  got.amfFrcProfile==3&&got.amfFrcMvSearch==2&&got.amfFrcUseFutureFrame,"v38 restores all seven M1-M3 options");
+            check(got.sr&&got.videoSrQuality==kVideoSrFsr&&got.multiplier==2&&got.frameGenerationBackend==FrameGenerationBackend::AmdFrc,
+                  "v38 restores the FSR SR / AMF FRC settings the options belong to");
+            check(got.validate().empty(),"a reloaded v38 preset is still valid");
+        }
+        const auto v38=bytes(aiPath);
+        PresetStore resave(aiPath);
+        const bool same38=resave.load()&&resave.entries().size()==1&&
+            resave.put(resave.entries().front().name,resave.entries().front().settings,true);
+        check(same38&&bytes(aiPath)==v38,"re-saving a v38 file reproduces the same bytes");
+        // A store that never touches the seven options keeps its older version.
+        EnhancementSettings protect;protect.exclusion.enabled=true;
+        check(protect.validate().empty(),"v37 exclusion settings validate");
+        const auto v37Path=root/L"m1-m3-v37.txt";
+        PresetStore v37writer(v37Path);
+        check(v37writer.load()&&v37writer.put(L"protect",protect),"settings preset with an exclusion mask");
+        check(bytes(v37Path).starts_with("VEYRA_PRESETS 37"),"M1-M3 defaults keep a v37 store at v37");
+        const auto v37bytes=bytes(v37Path);
+        PresetStore v37resave(v37Path);
+        const bool same37=v37resave.load()&&v37resave.entries().size()==1&&
+            v37resave.put(v37resave.entries().front().name,v37resave.entries().front().settings,true);
+        check(same37&&bytes(v37Path)==v37bytes,"re-saving a v37 file reproduces the same bytes");
+        PresetStore upgrade(v37Path);check(upgrade.load(),"v37 reload before upgrade");
+        check(upgrade.put(L"ai",ai)&&bytes(v37Path).starts_with("VEYRA_PRESETS 38"),"adding an M1-M3 entry upgrades a v37 store to v38");
+        PresetStore upgradeReader(v37Path);
+        const bool upgraded=upgradeReader.load()&&upgradeReader.entries().size()==2;
+        check(upgraded,"v38 keeps the older v37 entry");
+        if(upgraded){
+            const auto& kept37=upgradeReader.entries().front().settings;
+            check(kept37.exclusion.enabled&&kept37.fsrSrVersionMode==0&&kept37.fsrSrReactiveMask&&!kept37.fsrSrSharpening&&
+                  kept37.fsrSrSharpness==0.5f&&kept37.amfFrcProfile==0&&kept37.amfFrcMvSearch==0&&!kept37.amfFrcUseFutureFrame,
+                  "the v38 layout gives an older entry the M1-M3 defaults");
+        }
+        // A newer build's file is rejected whole and never overwritten.
+        const auto futurePath=root/L"m1-m3-future.txt";
+        const std::string future="VEYRA_PRESETS 40\n\"\" 1\n\"new\" 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 2 0 0 0 1 2\n";
+        {std::ofstream f(futurePath,std::ios::binary);f<<future;}
+        PresetStore futureReader(futurePath);
+        check(!futureReader.load(),"a newer settings version is rejected");
+        check(!futureReader.error().empty(),"rejecting a newer version reports why");
+        check(bytes(futurePath)==future&&!futureReader.put(L"ai",ai),"a newer settings file is never overwritten");
+        // A truncated v38 line (the options cut off) is rejected, not half-read.
+        const auto cut=v38.substr(0,v38.size()>14?v38.size()-14:0);
+        const auto cutPath=root/L"m1-m3-cut.txt";
+        {std::ofstream f(cutPath,std::ios::binary);f<<cut;}
+        PresetStore cutReader(cutPath);
+        check(!cutReader.load(),"a truncated v38 line is rejected");
+        check(bytes(cutPath)==cut,"a truncated v38 file is left alone");
+    }
+
+    // Spatial single-frame SR (W6, 2026-11-24): ArtCNN 4-bit/16-bit (24/25), AMF
+    // HQScaler (26), AMF VQ Enhancer (27) and ORT-DML SPAN / RealPLKSR (28/29).
+    // They are vendor neutral and never temporal, so they need no motion vectors
+    // and run on AMD/Intel adapters too. Retired ID 6 stays invalid.
+    {
+        const uint32_t spatial[]{24u,25u,26u,27u,28u,29u};
+        for(uint32_t q:spatial)check(validVideoSrQuality(q),"spatial SR qualities are stored values");
+        for(uint32_t q:{6u,7u,20u,22u,30u})check(!validVideoSrQuality(q),"retired or unassigned SR qualities stay invalid");
+        for(uint32_t q:spatial){
+            check(!temporalVideoSr(q),"spatial SR never reads the SR motion source");
+            check(!rtxVideoSr(q),"spatial SR is not an RTX Video SR family value");
+            check(spatialCnnVideoSr(q),"the spatial family predicate covers 24..29");
+            EnhancementSettings s;s.sr=true;s.videoSrQuality=q;
+            check(s.validate().empty()&&!s.temporalSr(),"spatial SR validates and is spatial");
+        }
+        // Disjoint partition: ArtCNN {24,25}, AMF HQ {26}, AMF VQ {27}, DML {28,29}.
+        for(uint32_t q:spatial){
+            check(artcnnVideoSr(q)==(q==24||q==25),"ArtCNN covers 24/25 only");
+            check(amfHqVideoSr(q)==(q==26),"AMF HQScaler is 26 only");
+            check(amfVqVideoSr(q)==(q==27),"AMF VQ Enhancer is 27 only");
+            check(amfVideoSr(q)==(q==26||q==27),"AMF covers 26/27 only");
+            check(dmlVideoSr(q)==(q==28||q==29),"ORT-DML covers 28/29 only");
+            const int families=int(artcnnVideoSr(q))+int(amfVideoSr(q))+int(dmlVideoSr(q));
+            check(families==1,"each spatial SR value belongs to exactly one family");
+        }
+        for(uint32_t q:{0u,kVideoSrFsr,1u,2u,3u,4u,16u,19u,21u,23u,6u,30u}){
+            check(!spatialCnnVideoSr(q),"non-spatial SR values are outside spatialCnnVideoSr");
+            check(!artcnnVideoSr(q)&&!amfVideoSr(q)&&!dmlVideoSr(q),"non-spatial SR values are outside every spatial family");
+        }
+        // A spatial base or second pass never asks for the SR motion source.
+        EnhancementSettings dual;dual.sr=true;dual.videoSrQuality=27;dual.dualSrEnabled=true;dual.dualSrQuality=27;dual.srPrescale=SrPrescale::P1080;
+        check(dual.validate().empty(),"a spatial second pass validates");
+        check(!dual.temporalSr(),"spatial SR never needs the SR motion source, in either pass");
+        dual.videoSrQuality=26;dual.dualSrQuality=29;
+        check(!dual.temporalSr(),"mixed spatial passes stay motion-free");
+        dual.dualSrQuality=0;
+        check(dual.temporalSr(),"a DLSS SR second pass still reads the SR motion source");
+    }
+
+    // Graph description by adapter vendor: vendor-neutral spatial IDs (ArtCNN
+    // 24/25, DirectML 28/29) enable SR on NVIDIA, AMD and Intel when enlarging;
+    // AMD AMF video SR (26/27) enables SR on AMD adapters only.
+    {
+        EnhancementSettings s;s.sr=true;s.srTarget=SrTarget::Uhd4K;
+        for(uint32_t q:{24u,25u,28u,29u}){
+            s.videoSrQuality=q;
+            const auto descIntel=describe(s,1920,1080,nullptr,false,false,false);
+            const auto descAmd=describe(s,1920,1080,nullptr,false,false,true);
+            check(descIntel.enableSr&&descIntel.videoSrQuality==q,"vendor-neutral spatial SR enlarges 1080p -> 4K on Intel");
+            check(descAmd.enableSr&&descAmd.videoSrQuality==q,"vendor-neutral spatial SR enlarges 1080p -> 4K on AMD");
+        }
+        for(uint32_t q:{26u,27u}){
+            s.videoSrQuality=q;
+            const auto descAmd=describe(s,1920,1080,nullptr,false,false,true);
+            check(descAmd.enableSr&&descAmd.videoSrQuality==q,"AMF video SR enlarges 1080p -> 4K on AMD");
+            check(!describe(s,1920,1080,nullptr,false,false,false).enableSr,"AMF video SR stays off on Intel");
+            check(!describe(s,1920,1080,nullptr,true,false,false).enableSr,"AMF video SR stays off on NVIDIA");
+        }
+        // Already at the target: only the 1x AMF VQ Enhancer (27) runs, and only on AMD.
+        s.videoSrQuality=27;
+        check(describe(s,3840,2160,nullptr,false,false,true).enableSr,"AMF VQ Enhancer runs 1x on AMD");
+        check(!describe(s,3840,2160,nullptr,false,false,false).enableSr,"AMF VQ Enhancer stays off at 1x on Intel");
+        check(!describe(s,3840,2160,nullptr,true,false,false).enableSr,"AMF VQ Enhancer stays off at 1x on NVIDIA");
+        for(uint32_t q:{24u,25u,26u,28u,29u}){
+            s.videoSrQuality=q;
+            check(!describe(s,3840,2160,nullptr,false,false,true).enableSr,"the other spatial methods never run at the target size on AMD");
+            check(!describe(s,3840,2160,nullptr,true,false,false).enableSr,"the other spatial methods never run at the target size on NVIDIA");
+        }
+        s.videoSrQuality=27;
+        check(!describe(s,3840,2160,nullptr,false,true,true).enableSr,"AMF VQ Enhancer skips still images on AMD");
+        check(!describe(s,3840,2160,nullptr,true,true,false).enableSr,"AMF VQ Enhancer skips still images on NVIDIA");
+        // The vendor gate still rejects the RTX families off NVIDIA.
+        s.videoSrQuality=4;
+        check(!describe(s,1920,1080,nullptr,false,false,true).enableSr,"standard RTX Video SR stays NVIDIA only");
+    }
+
+    // Settings persistence: spatial SR is a v39 layout identical to v38, so an
+    // older reader rejects the header instead of loading an SR it cannot run.
+    {
+        const auto spatialPath=root/L"spatial-sr.txt";
+        std::vector<EnhancementSettings> saved;
+        for(uint32_t q:{24u,25u,26u,27u,28u,29u}){
+            EnhancementSettings s;s.sr=true;s.srTarget=SrTarget::Uhd4K;s.videoSrQuality=q;
+            PresetStore store(spatialPath);
+            const std::wstring name=L"spatial"+std::to_wstring(q);
+            check(store.load()&&store.put(name,s),"settings preset with a spatial SR value");
+            saved.push_back(s);
+        }
+        check(bytes(spatialPath).starts_with("VEYRA_PRESETS 39"),"spatial SR writes v39");
+        PresetStore reader(spatialPath);
+        const bool reloaded=reader.load()&&reader.entries().size()==6;
+        check(reloaded,"v39 reload");
+        if(reloaded){
+            for(size_t i=0;i<6;++i){
+                const auto& got=reader.entries()[i].settings;
+                check(got.sr&&got.srTarget==SrTarget::Uhd4K&&got.videoSrQuality==saved[i].videoSrQuality,"v39 restores the spatial SR quality exactly");
+            }
+        }
+        const auto v39=bytes(spatialPath);
+        PresetStore resave(spatialPath);
+        const bool same39=resave.load()&&resave.entries().size()==6&&
+            resave.put(resave.entries().front().name,resave.entries().front().settings,true);
+        check(same39&&bytes(spatialPath)==v39,"re-saving a v39 file reproduces the same bytes");
+        // A store without spatial SR keeps v38; the spatial block is not emitted.
+        EnhancementSettings ai;ai.sr=true;ai.videoSrQuality=kVideoSrFsr;ai.fsrSrVersionMode=2;ai.fsrSrSharpness=0.8f;
+        const auto v38Path=root/L"spatial-v38.txt";
+        PresetStore v38writer(v38Path);check(v38writer.load()&&v38writer.put(L"ai",ai),"settings preset without spatial SR");
+        check(bytes(v38Path).starts_with("VEYRA_PRESETS 38"),"no spatial SR keeps a v38 store at v38");
+        // Adding a spatial entry upgrades the same file to v39 and keeps v38 defaults.
+        PresetStore upgrade(v38Path);check(upgrade.load(),"v38 reload before upgrade");
+        EnhancementSettings spatial;spatial.sr=true;spatial.videoSrQuality=26;
+        check(upgrade.put(L"hq",spatial)&&bytes(v38Path).starts_with("VEYRA_PRESETS 39"),"adding a spatial entry upgrades to v39");
+        PresetStore upgraded(v38Path);
+        const bool ok=upgraded.load()&&upgraded.entries().size()==2;
+        check(ok,"v39 keeps the older v38 entry");
+        if(ok){
+            const auto& kept38=upgraded.entries().front().settings;
+            check(kept38.videoSrQuality==kVideoSrFsr&&kept38.fsrSrVersionMode==2&&kept38.fsrSrSharpness==0.8f,
+                  "the v39 layout restores older v38 fields");
+            const auto& gotSpatial=upgraded.entries().back().settings;
+            check(gotSpatial.videoSrQuality==26&&gotSpatial.fsrSrVersionMode==0&&gotSpatial.fsrSrReactiveMask&&
+                  !gotSpatial.fsrSrSharpening&&gotSpatial.fsrSrSharpness==0.5f,"a spatial entry gets the v38 option defaults");
+        }
+        // A v40 file is a newer layout: rejected whole, never overwritten.
+        const auto v40Path=root/L"spatial-v40.txt";
+        const std::string v40="VEYRA_PRESETS 40\n\"\" 1\n\"new\" 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 2 0 0 0 1 2\n";
+        {std::ofstream f(v40Path,std::ios::binary);f<<v40;}
+        PresetStore v40reader(v40Path);
+        check(!v40reader.load(),"a v40 settings version is rejected");
+        check(bytes(v40Path)==v40&&!v40reader.put(L"hq",spatial),"a v40 settings file is never overwritten");
     }
 
     std::cout<<"Video AI settings "<<checks<<" checks, "<<failures<<" failures\n";return failures?1:0;

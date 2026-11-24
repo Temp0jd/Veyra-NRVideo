@@ -146,6 +146,7 @@ struct AmfFrcBackend::Impl {
     D3D12_RESOURCE_STATES outState = D3D12_RESOURCE_STATE_COMMON;
     uint32_t width = 0, height = 0;
     uint64_t inputs = 0, outputs = 0;
+    bool useFutureFrame = false;
 #endif
     bool ready = false;
     std::string version;
@@ -164,7 +165,7 @@ bool AmfFrcBackend::runtimeInstalled() {
 bool AmfFrcBackend::ready() const { return p_->ready; }
 bool AmfFrcBackend::warmingUp() const {
 #ifdef VEYRA_HAS_AMF
-    return p_->inputs <= 2; // the first input has no pair; the second is the warm-up repeat
+    return p_->inputs <= (p_->useFutureFrame ? 3u : 2u); // the first input has no pair; the second is the warm-up repeat (future frame adds 1)
 #else
     return true;
 #endif
@@ -172,12 +173,19 @@ bool AmfFrcBackend::warmingUp() const {
 const std::string& AmfFrcBackend::runtimeVersion() const { return p_->version; }
 
 bool AmfFrcBackend::initialize(ID3D12Device* device, ID3D12CommandQueue* queue, uint32_t width, uint32_t height, DXGI_FORMAT format, bool lowPower) {
+    Config cfg;
+    cfg.lowPower = lowPower;
+    return initialize(device, queue, width, height, format, cfg);
+}
+
+bool AmfFrcBackend::initialize(ID3D12Device* device, ID3D12CommandQueue* queue, uint32_t width, uint32_t height, DXGI_FORMAT format, const Config& config) {
 #ifdef VEYRA_HAS_AMF
     shutdown();
     auto& p = *p_;
     const auto& rt = runtime();
     p.version = rt.version;
     if (!rt.factory) { log::error("amf-frc", "AMF runtime unavailable; AMD FRC needs an AMD GPU driver"); return false; }
+    if (!device || !queue || !width || !height) return false;
     const auto amfFormat = surfaceFormat(format);
     if (amfFormat == amf::AMF_SURFACE_UNKNOWN) { log::error("amf-frc", std::format("unsupported texture format {}", int(format))); return false; }
     const auto start = std::chrono::steady_clock::now();
@@ -191,18 +199,28 @@ bool AmfFrcBackend::initialize(ID3D12Device* device, ID3D12CommandQueue* queue, 
     if (result != AMF_OK || !p.frc) { log::error("amf-frc", std::format("CreateComponent(AMFFRC) failed result={} runtime={}", int(result), p.version)); shutdown(); return false; }
     // AMD's guidance: the SUPER motion-search profile from 1440p up, HIGH below.
     const bool large = uint64_t(width) * height > uint64_t(2560) * 1440;
+    AMF_FRC_PROFILE_TYPE frcProfile = large ? FRC_PROFILE_SUPER : FRC_PROFILE_HIGH;
+    const char* profileName = large ? "super" : "high";
+    if (config.profile == Profile::Low) { frcProfile = FRC_PROFILE_LOW; profileName = "low"; }
+    else if (config.profile == Profile::High) { frcProfile = FRC_PROFILE_HIGH; profileName = "high"; }
+    else if (config.profile == Profile::Super) { frcProfile = FRC_PROFILE_SUPER; profileName = "super"; }
     // The downscaled (performance) search returned the previous frame unchanged at
     // 640x360 while it interpolated from 960x540 up (probe on the Radeon iGPU,
     // 2026-11-14); small frames are cheap with the full-resolution search anyway.
-    lowPower = lowPower && uint64_t(width) * height >= uint64_t(1280) * 720;
+    const bool autoPerf = config.lowPower && uint64_t(width) * height >= uint64_t(1280) * 720;
+    AMF_FRC_MV_SEARCH_MODE_TYPE mvSearch = autoPerf ? FRC_MV_SEARCH_PERFORMANCE : FRC_MV_SEARCH_NATIVE;
+    const char* mvSearchName = autoPerf ? "performance" : "native";
+    if (config.mvSearchMode == MvSearchMode::Native) { mvSearch = FRC_MV_SEARCH_NATIVE; mvSearchName = "native"; }
+    else if (config.mvSearchMode == MvSearchMode::Performance) { mvSearch = FRC_MV_SEARCH_PERFORMANCE; mvSearchName = "performance"; }
+    p.useFutureFrame = config.useFutureFrame;
     p.frc->SetProperty(AMF_FRC_ENGINE_TYPE, amf_int64(FRC_ENGINE_DX12));
     p.frc->SetProperty(AMF_FRC_MODE, amf_int64(FRC_ONLY_INTERPOLATED));
     p.frc->SetProperty(AMF_FRC_ENABLE_FALLBACK, true); // blend, not repeat, where the motion is unsure
     p.frc->SetProperty(AMF_FRC_INDICATOR, false);
-    p.frc->SetProperty(AMF_FRC_PROFILE, amf_int64(large ? FRC_PROFILE_SUPER : FRC_PROFILE_HIGH));
-    p.frc->SetProperty(AMF_FRC_MV_SEARCH_MODE, amf_int64(lowPower ? FRC_MV_SEARCH_PERFORMANCE : FRC_MV_SEARCH_NATIVE));
-    // The future frame would add one more frame of delay and shift the output a pair later.
-    p.frc->SetProperty(AMF_FRC_USE_FUTURE_FRAME, false);
+    p.frc->SetProperty(AMF_FRC_PROFILE, amf_int64(frcProfile));
+    p.frc->SetProperty(AMF_FRC_MV_SEARCH_MODE, amf_int64(mvSearch));
+    // Future-frame dependency improves occlusion/fast-motion quality at +1 frame of latency.
+    p.frc->SetProperty(AMF_FRC_USE_FUTURE_FRAME, p.useFutureFrame);
     result = p.frc->Init(amfFormat, amf_int32(width), amf_int32(height));
     if (result != AMF_OK) { log::error("amf-frc", std::format("Init failed result={} {}x{} format={}", int(result), width, height, int(format))); shutdown(); return false; }
     D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -221,12 +239,12 @@ bool AmfFrcBackend::initialize(ID3D12Device* device, ID3D12CommandQueue* queue, 
         p.input[i]->SetPrivateDataInterface(AMFFenceGUID, p.inputFence[i].Get());
     }
     p.queue = queue; p.width = width; p.height = height; p.ready = true;
-    log::info("amf-frc", std::format("ready runtime={} {}x{} format={} profile={} motionSearch={} futureFrame=0 mode=only-interpolated initMs={:.1f}",
-        p.version, width, height, int(format), large ? "super" : "high", lowPower ? "performance" : "native",
+    log::info("amf-frc", std::format("ready runtime={} {}x{} format={} profile={} motionSearch={} futureFrame={} mode=only-interpolated initMs={:.1f}",
+        p.version, width, height, int(format), profileName, mvSearchName, p.useFutureFrame ? 1 : 0,
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count()));
     return true;
 #else
-    (void)device; (void)queue; (void)width; (void)height; (void)format; (void)lowPower;
+    (void)device; (void)queue; (void)width; (void)height; (void)format; (void)config;
     log::error("amf-frc", "this build has no AMF SDK headers");
     return false;
 #endif
@@ -351,7 +369,7 @@ void AmfFrcBackend::shutdown() {
     }
     if (p.context) { p.context->Terminate(); p.context = nullptr; }
     p.queue.Reset();
-    p.next = 0; p.captured = -1; p.inputs = p.outputs = 0;
+    p.next = 0; p.captured = -1; p.inputs = p.outputs = 0; p.useFutureFrame = false;
 #endif
     p_->ready = false;
 }

@@ -147,6 +147,8 @@ add_library(veyra_gfx STATIC
   src/gfx/XessPacing.cpp
   src/gfx/FsrFgPresenter.cpp
   src/gfx/AmfFrcBackend.cpp
+  src/gfx/AmfHqScalerBackend.cpp
+  src/gfx/AmfVqEnhancerBackend.cpp
   src/gfx/FsrSrBackend.cpp
 )
 veyra_apply_warnings(veyra_gfx)
@@ -172,6 +174,18 @@ if(EXISTS "${VEYRA_AMF_SDK_ROOT}/include/components/FRC.h")
 else()
   message(STATUS "AMF SDK headers not found at ${VEYRA_AMF_SDK_ROOT}; AMD FRC is unavailable in this build")
 endif()
+# AMF video SR components gate independently: a prepared SDK may ship HQScaler /
+# VQEnhancer without FRC. CMake de-duplicates the repeated include dir and ole32.
+if(EXISTS "${VEYRA_AMF_SDK_ROOT}/include/components/HQScaler.h")
+  target_include_directories(veyra_gfx PRIVATE "${VEYRA_AMF_SDK_ROOT}/include")
+  target_compile_definitions(veyra_gfx PRIVATE VEYRA_HAS_AMF_HQSCALER=1)
+  target_link_libraries(veyra_gfx PRIVATE ole32)
+endif()
+if(EXISTS "${VEYRA_AMF_SDK_ROOT}/include/components/VQEnhancer.h")
+  target_include_directories(veyra_gfx PRIVATE "${VEYRA_AMF_SDK_ROOT}/include")
+  target_compile_definitions(veyra_gfx PRIVATE VEYRA_HAS_AMF_VQENHANCER=1)
+  target_link_libraries(veyra_gfx PRIVATE ole32)
+endif()
 if(EXISTS "${VEYRA_FIDELITYFX2_ROOT}/framegeneration/include/dx12/ffx_api_framegeneration_dx12.h")
   target_include_directories(veyra_gfx PRIVATE
     "${VEYRA_FIDELITYFX2_ROOT}/api/include"
@@ -196,6 +210,7 @@ add_library(veyra_ngx STATIC
   src/ngx/NgxCoreHost.cpp
   src/ngx/NgxCoreCache.cpp
   src/ngx/DlssNrRuntimeAdapter.cpp
+  src/ngx/DlssNrCoreHost.cpp
   src/ngx/NvapiLifetime.cpp
   src/ngx/DlssSrBackend.cpp
     src/ngx/VideoSrBackend.cpp
@@ -284,6 +299,15 @@ veyra_add_compute_shader(veyra_shader_parity_decode ParityDecode)
 veyra_add_compute_shader(veyra_shader_rdna3_nr_decode Rdna3NrDecode)
 veyra_add_compute_shader(veyra_shader_hdr_video_sr HdrVideoSrRestore)
 veyra_add_compute_shader(veyra_shader_sr_resolve SrResolve)
+# Spatial single-frame SR (W6): ArtCNN prep/stem/conv/finish and the ORT-DML
+# pre/post processed passes. Registered unconditionally: the host falls back to
+# a clean "unavailable" path when the runtime or model is missing.
+veyra_add_compute_shader(veyra_shader_artcnn_prep ArtCnnPrep)
+veyra_add_compute_shader(veyra_shader_artcnn_stem ArtCnnStem)
+veyra_add_compute_shader(veyra_shader_artcnn_conv ArtCnnConv)
+veyra_add_compute_shader(veyra_shader_artcnn_finish ArtCnnFinish)
+veyra_add_compute_shader(veyra_shader_ort_dml_preprocess OrtDmlPreprocess)
+veyra_add_compute_shader(veyra_shader_ort_dml_postprocess OrtDmlPostprocess)
 veyra_add_compute_shader(veyra_shader_hdr_amd_nr_encode HdrAmdNrEncode)
 veyra_add_compute_shader(veyra_shader_hdr_amd_nr_restore HdrAmdNrRestore)
 if(VEYRA_ENABLE_EXPERIMENTAL_DLSSNR)
@@ -374,6 +398,7 @@ veyra_add_compute_shader(veyra_shader_nr_hold NrHold)
 veyra_add_compute_shader(veyra_shader_nr_reuse_compose NrReuseCompose)
 veyra_add_compute_shader(veyra_shader_nr_reuse_warp NrReuseWarp)
 veyra_add_compute_shader(veyra_shader_flow_adapt FlowAdapt)
+veyra_add_compute_shader(veyra_shader_fsr_reactive_mask FsrReactiveMask)
 veyra_add_compute_shader(veyra_shader_flow_refine FlowRefine)
 veyra_add_compute_shader(veyra_shader_flow_fill FlowFill)
 veyra_add_compute_shader(veyra_shader_flow_claim FlowClaim)
@@ -450,10 +475,18 @@ add_library(veyra_pipeline STATIC
   src/pipeline/NrInstance.cpp
   src/pipeline/AmdHipPreflight.cpp
   src/pipeline/LmxxfNrBackend.cpp
+  src/pipeline/MochiNrBackend.cpp
+  src/pipeline/DlssNrCoreBackend.cpp
+  src/pipeline/DlssNrCoreHostStub.cpp
+  src/pipeline/AmdNrBackendFactory.cpp
   src/pipeline/Rdna3NrBackend.cpp
   src/pipeline/VfgBackend.cpp
   src/pipeline/VfgAmpereCompat.cpp
   src/pipeline/VfxSrBackend.cpp
+  # Unconditional so no-FFmpeg builds still link ArtCnnBackend.cpp (W6 / risk R1).
+  src/beauty/OnnxLite.cpp
+  src/pipeline/ArtCnnBackend.cpp
+  src/pipeline/OrtDmlSrBackend.cpp
 )
 veyra_apply_warnings(veyra_pipeline)
 # FFmpeg/NVOF headers are third-party: /WX stays off for this target.
@@ -469,7 +502,10 @@ if(EXISTS "${VEYRA_CUDA_DRIVER_INCLUDE_DIR}/cuda.h")
   target_compile_definitions(veyra_pipeline PRIVATE VEYRA_HAVE_CUDA_DRIVER_HEADERS=1)
 endif()
 target_link_libraries(veyra_pipeline PUBLIC veyra_base veyra_gfx d3d12 dxgi dxguid d3dcompiler)
-add_dependencies(veyra_pipeline veyra_shader_rdna3_nr_decode)
+add_dependencies(veyra_pipeline veyra_shader_rdna3_nr_decode
+  veyra_shader_artcnn_prep veyra_shader_artcnn_stem veyra_shader_artcnn_conv
+  veyra_shader_artcnn_finish
+  veyra_shader_ort_dml_preprocess veyra_shader_ort_dml_postprocess)
 
 # Optional independent RX7000 network worker. All third-party source and runtime
 # assets remain external; only our host and reproducible preparation script live here.
@@ -757,7 +793,7 @@ if(VEYRA_FFMPEG_ROOT AND EXISTS "${VEYRA_FFMPEG_ROOT}/include/libavformat/avform
 
   # veyra_sources: product input sources (Playbook R3/R7). MediaFileSource
   # composes veyra_media; no second decode implementation exists.
-  add_dependencies(veyra_pipeline veyra_shader_effect_exclusion veyra_shader_hud_lock_update veyra_shader_hud_lock_compose veyra_shader_sr_resolve veyra_shader_nr_downsample veyra_shader_nr_residual veyra_shader_nr_temporal veyra_shader_nr_hold veyra_shader_nr_reuse_compose veyra_shader_nr_reuse_warp veyra_shader_flow_adapt veyra_shader_flow_refine veyra_shader_flow_fill veyra_shader_flow_claim veyra_shader_vfg_shot_change)
+  add_dependencies(veyra_pipeline veyra_shader_effect_exclusion veyra_shader_hud_lock_update veyra_shader_hud_lock_compose veyra_shader_sr_resolve veyra_shader_nr_downsample veyra_shader_nr_residual veyra_shader_nr_temporal veyra_shader_nr_hold veyra_shader_nr_reuse_compose veyra_shader_nr_reuse_warp veyra_shader_flow_adapt veyra_shader_fsr_reactive_mask veyra_shader_flow_refine veyra_shader_flow_fill veyra_shader_flow_claim veyra_shader_vfg_shot_change)
   add_library(veyra_sources STATIC
     src/source/NativeCaptureSink.cpp
     src/source/MediaFileSource.cpp
@@ -1796,6 +1832,39 @@ target_link_options(veyra_hdr_tuning_tests PRIVATE /STACK:33554432)
   add_executable(veyra_effect_availability_tests tests/unit/EffectAvailabilityTests.cpp)
   target_compile_features(veyra_effect_availability_tests PRIVATE cxx_std_20)
   target_include_directories(veyra_effect_availability_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_executable(veyra_ffx_version_select_tests tests/unit/FfxVersionSelectTests.cpp)
+  target_compile_features(veyra_ffx_version_select_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_ffx_version_select_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_executable(veyra_mochi_nr_probe_tests tests/unit/MochiNrBackendTests.cpp)
+  target_compile_features(veyra_mochi_nr_probe_tests PRIVATE cxx_std_20)
+  target_include_directories(veyra_mochi_nr_probe_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  # Spatial SR contract tests (W6): ArtCNN tile packing, the AMF video enhance
+  # properties, and the ORT-DML session glue. CPU/ABI only; no device needed.
+  add_executable(veyra_artcnn_pack_tests tests/unit/ArtCnnPackTests.cpp)
+  target_compile_features(veyra_artcnn_pack_tests PRIVATE cxx_std_20)
+  target_compile_options(veyra_artcnn_pack_tests PRIVATE /utf-8)
+  target_compile_definitions(veyra_artcnn_pack_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_artcnn_pack_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_artcnn_pack_tests PRIVATE veyra_pipeline)
+  add_executable(veyra_amf_video_enhance_tests tests/unit/AmfVideoEnhanceTests.cpp)
+  target_compile_features(veyra_amf_video_enhance_tests PRIVATE cxx_std_20)
+  target_compile_options(veyra_amf_video_enhance_tests PRIVATE /utf-8)
+  target_compile_definitions(veyra_amf_video_enhance_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_amf_video_enhance_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_amf_video_enhance_tests PRIVATE veyra_gfx)
+  add_executable(veyra_ort_dml_session_tests tests/unit/OrtDmlSessionTests.cpp)
+  target_compile_features(veyra_ort_dml_session_tests PRIVATE cxx_std_20)
+  target_compile_options(veyra_ort_dml_session_tests PRIVATE /utf-8)
+  target_compile_definitions(veyra_ort_dml_session_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_ort_dml_session_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_ort_dml_session_tests PRIVATE veyra_pipeline)
+  # Standalone memory-info probe for a user-supplied DirectML ORT runtime.
+  add_executable(veyra_ort_dml_meminfo_probe tools/ort_dml_meminfo_probe.cpp)
+  target_compile_features(veyra_ort_dml_meminfo_probe PRIVATE cxx_std_20)
+  target_compile_options(veyra_ort_dml_meminfo_probe PRIVATE /utf-8)
+  target_compile_definitions(veyra_ort_dml_meminfo_probe PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_include_directories(veyra_ort_dml_meminfo_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(veyra_ort_dml_meminfo_probe PRIVATE ole32)
 
   add_executable(veyra_effect_chain_tests tests/unit/EffectChainTests.cpp src/engine/EffectChain.cpp)
   target_compile_features(veyra_effect_chain_tests PRIVATE cxx_std_20)
