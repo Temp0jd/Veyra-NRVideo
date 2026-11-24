@@ -6,6 +6,7 @@ param(
     [string]$DepsRoot = 'C:\veyra-deps',
     [string]$DisplayVersion = '2.2.0-amd-sr-test',
     [int]$Jobs = 2,
+    [string[]]$ExtraArgs = @(),
     [switch]$SkipChecks
 )
 # One-click Windows build for the AMD SR/FG integration.
@@ -137,7 +138,7 @@ $cmakeArgs = @(
     ('-DVEYRA_FIDELITYFX_ROOT=' + (Join-Path $Root 'third_party_local\amd\FidelityFX-SDK\sdk')),
     ('-DVEYRA_FFMPEG_ROOT=' + $ffmpegRoot),
     "-DVEYRA_DISPLAY_VERSION=$DisplayVersion"
-) + $libdoviArgs
+) + $libdoviArgs + $ExtraArgs
 
 Write-Host 'Importing the MSVC environment from vcvars64.bat ...'
 $envDump = & cmd.exe /d /c ("call `"$vcvars`" >nul && set")
